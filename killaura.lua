@@ -149,11 +149,23 @@ local function loadScript()
     local function raycastCheck(from, to)
         if not CONFIG.WallCheck then return true end
         
-        local direction = (to - from)
-        local ray = Ray.new(from, direction)
-        local hit = workspace:FindPartOnRay(ray, player.Character, false, true)
+        local params = RaycastParams.new()
+        params.FilterDescendantsInstances = {player.Character, workspace.CurrentCamera}
+        params.FilterType = Enum.RaycastFilterType.Blacklist
+        params.IgnoreWater = true
         
-        return not hit or hit:IsDescendantOf(workspace)
+        local direction = (to - from)
+        local result = workspace:Raycast(from, direction, params)
+        
+        if not result then return true end
+        
+        -- Check if hit is part of target or something we can ignore
+        local hitChar = result.Instance:FindFirstAncestorOfClass("Model")
+        if hitChar and hitChar:FindFirstChild("Humanoid") then
+            return true
+        end
+        
+        return false
     end
     
     -- Create GUI
@@ -431,12 +443,25 @@ local function loadScript()
     
     -- Functions
     local function getCharacter()
-        return player.Character
+        local char = player.Character
+        if not char then return nil end
+        
+        -- Verify character is valid
+        if not char.Parent then return nil end
+        if not char:FindFirstChildOfClass("Humanoid") then return nil end
+        
+        return char
     end
     
     local function getHRP()
         local char = getCharacter()
-        return char and char:FindFirstChild("HumanoidRootPart")
+        if not char then return nil end
+        
+        -- Support different body types
+        return char:FindFirstChild("HumanoidRootPart") 
+            or char:FindFirstChild("Torso") 
+            or char:FindFirstChild("UpperTorso")
+            or char:FindFirstChild("Head")
     end
     
     function createRangeIndicator()
@@ -491,7 +516,27 @@ local function loadScript()
     
     local function isTeammate(targetPlayer)
         if CONFIG.TargetTeammates then return false end
-        return player.Team and targetPlayer.Team and player.Team == targetPlayer.Team
+        
+        -- Method 1: Check Team
+        if player.Team and targetPlayer.Team and player.Team == targetPlayer.Team then
+            return true
+        end
+        
+        -- Method 2: Check TeamColor (for games using TeamColor)
+        if player.TeamColor and targetPlayer.TeamColor and player.TeamColor == targetPlayer.TeamColor then
+            return true
+        end
+        
+        -- Method 3: Check custom team attributes
+        pcall(function()
+            local myTeam = player:GetAttribute("Team") or player:GetAttribute("team")
+            local theirTeam = targetPlayer:GetAttribute("Team") or targetPlayer:GetAttribute("team")
+            if myTeam and theirTeam and myTeam == theirTeam then
+                return true
+            end
+        end)
+        
+        return false
     end
     
     local function findTargets()
@@ -502,8 +547,8 @@ local function loadScript()
         for _, p in pairs(Players:GetPlayers()) do
             if p ~= player and p.Character then
                 local char = p.Character
-                local hum = char:FindFirstChild("Humanoid")
-                local thrp = char:FindFirstChild("HumanoidRootPart")
+                local hum = char:FindFirstChildOfClass("Humanoid")
+                local thrp = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso") or char:FindFirstChild("UpperTorso")
                 
                 if hum and thrp and hum.Health > 0 then
                     local dist = (hrp.Position - thrp.Position).Magnitude
@@ -557,29 +602,91 @@ local function loadScript()
             end
         end)
         
-        -- Kích hoạt tool để game xử lý damage
         local char = getCharacter()
-        if char then
-            local tool = char:FindFirstChildOfClass("Tool")
-            if tool then
-                pcall(function() 
-                    tool:Activate() 
-                end)
-                
-                -- Thử fire remote nếu có
-                for _, v in pairs(tool:GetDescendants()) do
-                    if v:IsA("RemoteEvent") or v:IsA("RemoteFunction") then
+        if not char then return end
+        
+        -- Method 1: Activate tool
+        local tool = char:FindFirstChildOfClass("Tool")
+        if tool then
+            pcall(function() 
+                tool:Activate()
+            end)
+            
+            -- Try to find and fire remotes in tool
+            for _, v in pairs(tool:GetDescendants()) do
+                if v:IsA("RemoteEvent") then
+                    pcall(function()
+                        -- Common remote patterns
+                        v:FireServer(target.hrp)
+                        v:FireServer(target.hrp, target.humanoid)
+                        v:FireServer({Target = target.hrp})
+                        v:FireServer({Hit = target.hrp, Humanoid = target.humanoid})
+                    end)
+                elseif v:IsA("RemoteFunction") then
+                    pcall(function()
+                        v:InvokeServer(target.hrp)
+                        v:InvokeServer(target.hrp, target.humanoid)
+                    end)
+                end
+            end
+        end
+        
+        -- Method 2: Try to find game combat remotes
+        pcall(function()
+            for _, remote in pairs(ReplicatedStorage:GetDescendants()) do
+                if remote:IsA("RemoteEvent") then
+                    local name = remote.Name:lower()
+                    -- Common combat remote names
+                    if name:match("damage") or name:match("attack") or name:match("hit") 
+                       or name:match("combat") or name:match("punch") or name:match("sword")
+                       or name:match("shoot") or name:match("fire") or name:match("slash") then
                         pcall(function()
-                            if v:IsA("RemoteEvent") then
-                                v:FireServer(target.hrp)
-                            else
-                                v:InvokeServer(target.hrp)
-                            end
+                            remote:FireServer(target.hrp)
+                            remote:FireServer(target.player)
+                            remote:FireServer(target.hrp, 100)
+                            remote:FireServer({Target = target.hrp})
                         end)
                     end
                 end
             end
-        end
+        end)
+        
+        -- Method 3: Mouse click simulation at target position
+        pcall(function()
+            local mouse = player:GetMouse()
+            if mouse then
+                mouse.Hit = target.hrp.CFrame
+                mousemoverel = mousemoverel or mouse1click
+                if mouse1click then
+                    mouse1click()
+                end
+            end
+        end)
+        
+        -- Method 4: Check for combat modules in game
+        pcall(function()
+            for _, module in pairs(game:GetDescendants()) do
+                if module:IsA("ModuleScript") then
+                    local name = module.Name:lower()
+                    if name:match("combat") or name:match("damage") or name:match("weapon") then
+                        local success, mod = pcall(require, module)
+                        if success and type(mod) == "table" then
+                            -- Try common function names
+                            for funcName, func in pairs(mod) do
+                                if type(func) == "function" then
+                                    local fname = tostring(funcName):lower()
+                                    if fname:match("damage") or fname:match("attack") or fname:match("hit") then
+                                        pcall(func, target.hrp)
+                                        pcall(func, target.player)
+                                        pcall(func, target.humanoid)
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end)
     end
     
     -- Toggle Function
@@ -682,30 +789,57 @@ local function loadScript()
         end
     end)
     
-    -- Character respawn
-    player.CharacterAdded:Connect(function()
+    -- Character respawn with retry logic
+    player.CharacterAdded:Connect(function(newChar)
+        local function setupCharacter()
+            task.wait(0.5)
+            
+            -- Wait for character to fully load
+            local hrp = newChar:WaitForChild("HumanoidRootPart", 5)
+            if not hrp then return end
+            
+            local hum = newChar:WaitForChild("Humanoid", 5)
+            if not hum then return end
+            
+            -- Recreate range indicator
+            if CONFIG.ShowVisuals then
+                createRangeIndicator()
+            end
+        end
+        
+        pcall(setupCharacter)
+    end)
+    
+    -- Initialize with retry
+    local function initialize()
+        task.wait(1) -- Wait for game to load
+        
+        -- Ensure character is loaded
+        if not player.Character then
+            player.CharacterAdded:Wait()
+        end
+        
         task.wait(0.5)
+        
         if CONFIG.ShowVisuals then
             createRangeIndicator()
         end
-    end)
-    
-    -- Initialize
-    if CONFIG.ShowVisuals then
-        createRangeIndicator()
+        
+        print("Kill Aura loaded successfully!")
+        print("Press K to toggle GUI")
     end
+    
+    task.spawn(initialize)
     
     -- Cleanup on script unload
     if getgenv then
         getgenv().KillAuraCleanup = function()
+            CONFIG.Enabled = false
             pcall(function() screenGui:Destroy() end)
             pcall(function() if rangeIndicator then rangeIndicator:Destroy() end end)
             print("Kill Aura cleaned up")
         end
     end
-    
-    print("Kill Aura loaded successfully!")
-    print("Press K to toggle GUI")
 end
 
 -- Protected call with multiple fallbacks

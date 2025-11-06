@@ -1,854 +1,652 @@
--- Universal Kill Aura Script with Anti-Ban
--- Compatible with all major executors
--- Optimized for safety and performance
+-- Universal Kill Aura - Optimized
+-- Compatible with all executors and games
 
--- Check executor environment
-local is_sirhurt_closure = is_sirhurt_closure or issentinelclosure
-local is_syn_closure = is_syn_closure or issynapsefunction
-local getgc = getgc or get_gc_objects
-local getconnections = getconnections or get_signal_cons
-local gethiddenproperty = gethiddenproperty or get_hidden_property
+-- Executor compatibility
 local gethui = gethui or get_hidden_gui or function() return game:GetService("CoreGui") end
+local protectgui = syn and syn.protect_gui or protectgui or function() end
+local mouse1click = mouse1click or function() end
 
-local function loadScript()
-    -- Services
-    local Players = game:GetService("Players")
-    local RunService = game:GetService("RunService")
-    local UserInputService = game:GetService("UserInputService")
-    local ReplicatedStorage = game:GetService("ReplicatedStorage")
-    
-    -- Player
-    local player = Players.LocalPlayer
-    local playerGui = gethui and gethui() or player:WaitForChild("PlayerGui")
-    
-    -- Anti-Ban Configuration (Nâng cao)
-    local ANTI_BAN = {
-        RandomizeDelay = true,      -- Randomize attack delays
-        MaxCPS = 15,                -- Max clicks per second (giảm xuống 15)
-        HumanBehavior = true,       -- Simulate human behavior
-        StealthMode = false,        -- Hide visual indicators
-        SafeDistance = 5,           -- Minimum safe distance (tăng lên 5)
-        SmartTarget = true,         -- Chỉ tấn công khi enemy nhìn khác hướng
-        RandomMiss = true,          -- Bỏ lỡ ngẫu nhiên đôi khi
-        MissChance = 0.05,          -- 5% cơ hội bỏ lỡ
-        AttackPattern = true,       -- Thay đổi pattern tấn công
-        CooldownPeriod = true,      -- Nghỉ giữa các đợt tấn công
-        CooldownChance = 0.1,       -- 10% cơ hội nghỉ
-        CooldownTime = 2,           -- Nghỉ 2 giây
-    }
-    
-    -- Main Config
-    local CONFIG = {
-        Enabled = false,
-        Range = 20,
-        MinDelay = 0.15,            -- Tăng min delay
-        MaxDelay = 0.4,             -- Tăng max delay
-        TargetTeammates = false,
-        ShowVisuals = true,
-        ToggleKey = Enum.KeyCode.K,
-        WallCheck = true,           -- Bật wall check mặc định
-        TargetLock = false,         -- Lock vào 1 target
-        AttackLimit = 5,            -- Giới hạn 5 đòn liên tiếp
-    }
-    
-    local lastAttackTime = 0
-    local rangeIndicator
-    local attackCount = 0
-    local lastResetTime = tick()
-    local currentTarget = nil
-    local consecutiveAttacks = 0
-    local lastCooldown = tick()
-    local inCooldown = false
-    local attackHistory = {}
-    
-    -- Utility Functions
-    local function safeWait(duration)
-        local start = tick()
-        while tick() - start < duration do
-            RunService.Heartbeat:Wait()
-        end
+-- Services (cached)
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local HttpService = game:GetService("HttpService")
+
+-- Player
+local player = Players.LocalPlayer
+local playerGui = gethui()
+
+-- Config
+local CONFIG = {
+    Enabled = false,
+    Range = 20,
+    Delay = 0.15,
+    ShowVisuals = true,
+    ToggleKey = Enum.KeyCode.K,
+}
+
+-- Anti-Ban
+local ANTIBAN = {
+    MaxCPS = 12,
+    SafeDistance = 5,
+    MissChance = 0.05,
+    AttackLimit = 5,
+    CooldownChance = 0.1,
+    CooldownTime = 2,
+}
+
+-- State
+local state = {
+    lastAttack = 0,
+    attackCount = 0,
+    resetTime = tick(),
+    consecutive = 0,
+    currentTarget = nil,
+    inCooldown = false,
+    lastCooldown = tick(),
+    rangeIndicator = nil,
+}
+
+-- Cache
+local cache = {
+    character = nil,
+    hrp = nil,
+    combatRemotes = {},
+    lastCacheUpdate = 0,
+}
+
+-- Utility Functions
+local function safeCall(func, ...)
+    local success, result = pcall(func, ...)
+    return success and result or nil
+end
+
+local function getRandomDelay()
+    local base = CONFIG.Delay
+    local variance = 0.1
+    local r1, r2 = math.random(), math.random()
+    local gaussian = math.sqrt(-2 * math.log(r1)) * math.cos(2 * math.pi * r2)
+    return math.clamp(base + (gaussian * variance), 0.1, 0.5)
+end
+
+local function checkCPS()
+    local now = tick()
+    if now - state.resetTime >= 1 then
+        state.attackCount = 0
+        state.resetTime = now
     end
-    
-    local function getRandomDelay()
-        if ANTI_BAN.RandomizeDelay then
-            -- Sử dụng phân phối chuẩn để delay tự nhiên hơn
-            local base = (CONFIG.MinDelay + CONFIG.MaxDelay) / 2
-            local variance = (CONFIG.MaxDelay - CONFIG.MinDelay) / 4
-            local random1 = math.random()
-            local random2 = math.random()
-            local gaussian = math.sqrt(-2 * math.log(random1)) * math.cos(2 * math.pi * random2)
-            local delay = base + (gaussian * variance)
-            return math.clamp(delay, CONFIG.MinDelay, CONFIG.MaxDelay)
+    return state.attackCount < ANTIBAN.MaxCPS
+end
+
+local function shouldMiss()
+    return math.random() < ANTIBAN.MissChance
+end
+
+local function checkCooldown()
+    local now = tick()
+    if state.inCooldown then
+        if now - state.lastCooldown >= ANTIBAN.CooldownTime then
+            state.inCooldown = false
         end
-        return CONFIG.MinDelay
-    end
-    
-    local function checkCPS()
-        local currentTime = tick()
-        if currentTime - lastResetTime >= 1 then
-            attackCount = 0
-            lastResetTime = currentTime
-        end
-        return attackCount < ANTI_BAN.MaxCPS
-    end
-    
-    local function shouldMissAttack()
-        if ANTI_BAN.RandomMiss then
-            return math.random() < ANTI_BAN.MissChance
-        end
-        return false
-    end
-    
-    local function checkCooldown()
-        if not ANTI_BAN.CooldownPeriod then return false end
-        
-        local currentTime = tick()
-        if inCooldown then
-            if currentTime - lastCooldown >= ANTI_BAN.CooldownTime then
-                inCooldown = false
-                lastCooldown = currentTime
-            end
-            return true
-        end
-        
-        if math.random() < ANTI_BAN.CooldownChance then
-            inCooldown = true
-            lastCooldown = currentTime
-            return true
-        end
-        
-        return false
-    end
-    
-    local function isTargetLookingAway(targetHRP, myHRP)
-        if not ANTI_BAN.SmartTarget then return true end
-        
-        -- Kiểm tra hướng nhìn của target
-        local targetLook = targetHRP.CFrame.LookVector
-        local directionToMe = (myHRP.Position - targetHRP.Position).Unit
-        local dotProduct = targetLook:Dot(directionToMe)
-        
-        -- Nếu dot product < 0.5 nghĩa là target đang nhìn khác hướng (>60 độ)
-        return dotProduct < 0.5
-    end
-    
-    local function canAttackTarget(target)
-        -- Kiểm tra attack limit
-        if consecutiveAttacks >= CONFIG.AttackLimit then
-            return false
-        end
-        
-        -- Kiểm tra target lock
-        if CONFIG.TargetLock and currentTarget and currentTarget ~= target then
-            return false
-        end
-        
         return true
     end
+    if math.random() < ANTIBAN.CooldownChance then
+        state.inCooldown = true
+        state.lastCooldown = now
+        return true
+    end
+    return false
+end
+
+-- Character Functions
+local function updateCache()
+    local now = tick()
+    if now - cache.lastCacheUpdate < 1 then return end
     
-    local function raycastCheck(from, to)
-        if not CONFIG.WallCheck then return true end
-        
-        local params = RaycastParams.new()
-        params.FilterDescendantsInstances = {player.Character, workspace.CurrentCamera}
-        params.FilterType = Enum.RaycastFilterType.Blacklist
-        params.IgnoreWater = true
-        
-        local direction = (to - from)
-        local result = workspace:Raycast(from, direction, params)
-        
-        if not result then return true end
-        
-        -- Check if hit is part of target or something we can ignore
-        local hitChar = result.Instance:FindFirstAncestorOfClass("Model")
-        if hitChar and hitChar:FindFirstChild("Humanoid") then
-            return true
-        end
-        
-        return false
+    cache.character = player.Character
+    if cache.character then
+        cache.hrp = cache.character:FindFirstChild("HumanoidRootPart") 
+                 or cache.character:FindFirstChild("Torso")
+                 or cache.character:FindFirstChild("UpperTorso")
     end
     
-    -- Create GUI
-    local screenGui = Instance.new("ScreenGui")
-    screenGui.Name = "KA_" .. game:GetService("HttpService"):GenerateGUID(false):sub(1, 8)
-    screenGui.ResetOnSpawn = false
-    screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    screenGui.IgnoreGuiInset = true
+    cache.lastCacheUpdate = now
+end
+
+local function getHRP()
+    updateCache()
+    return cache.hrp
+end
+
+-- Team Check
+local function isTeammate(p)
+    if not player.Team or not p.Team then return false end
+    return player.Team == p.Team
+end
+
+-- Raycast Check
+local function canSeeTarget(from, to)
+    local params = RaycastParams.new()
+    params.FilterDescendantsInstances = {cache.character}
+    params.FilterType = Enum.RaycastFilterType.Blacklist
+    params.IgnoreWater = true
     
-    -- Protection
-    pcall(function()
-        if gethiddenproperty then
-            gethiddenproperty(screenGui, "OnTopOfCoreBlur")
-        end
-        if syn and syn.protect_gui then
-            syn.protect_gui(screenGui)
-        end
-        if protectgui then
-            protectgui(screenGui)
-        end
-    end)
+    local result = workspace:Raycast(from, to - from, params)
+    if not result then return true end
     
-    -- Destroy existing GUI
-    pcall(function()
-        for _, gui in pairs(playerGui:GetChildren()) do
-            if gui.Name:match("KA_") or gui.Name:match("KillAura") then
-                gui:Destroy()
-            end
-        end
-    end)
+    local hitChar = result.Instance:FindFirstAncestorOfClass("Model")
+    return hitChar and hitChar:FindFirstChildOfClass("Humanoid") ~= nil
+end
+
+-- Find Targets
+local function findTargets()
+    local targets = {}
+    local myHRP = getHRP()
+    if not myHRP then return targets end
     
-    screenGui.Parent = playerGui
+    local myPos = myHRP.Position
     
-    -- Main Frame
-    local mainFrame = Instance.new("Frame")
-    mainFrame.Name = "MainFrame"
-    mainFrame.Size = UDim2.new(0, 280, 0, 220)
-    mainFrame.Position = UDim2.new(0.5, -140, 0.3, 0)
-    mainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 28)
-    mainFrame.BorderSizePixel = 0
-    mainFrame.Active = true
-    mainFrame.ClipsDescendants = true
-    mainFrame.Parent = screenGui
-    
-    local mainCorner = Instance.new("UICorner")
-    mainCorner.CornerRadius = UDim.new(0, 8)
-    mainCorner.Parent = mainFrame
-    
-    -- Stroke for border
-    local stroke = Instance.new("UIStroke")
-    stroke.Color = Color3.fromRGB(200, 40, 40)
-    stroke.Thickness = 1
-    stroke.Parent = mainFrame
-    
-    -- Gradient
-    local gradient = Instance.new("UIGradient")
-    gradient.Color = ColorSequence.new{
-        ColorSequenceKeypoint.new(0, Color3.fromRGB(25, 25, 33)),
-        ColorSequenceKeypoint.new(1, Color3.fromRGB(15, 15, 23))
-    }
-    gradient.Rotation = 90
-    gradient.Parent = mainFrame
-    
-    -- Dragging
-    local dragging, dragInput, dragStart, startPos
-    
-    mainFrame.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            dragging = true
-            dragStart = input.Position
-            startPos = mainFrame.Position
+    for _, p in pairs(Players:GetPlayers()) do
+        if p ~= player and p.Character then
+            local hum = p.Character:FindFirstChildOfClass("Humanoid")
+            local hrp = p.Character:FindFirstChild("HumanoidRootPart") 
+                     or p.Character:FindFirstChild("Torso")
+                     or p.Character:FindFirstChild("UpperTorso")
             
-            input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then
-                    dragging = false
-                end
-            end)
-        end
-    end)
-    
-    mainFrame.InputChanged:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseMovement then
-            dragInput = input
-        end
-    end)
-    
-    UserInputService.InputChanged:Connect(function(input)
-        if input == dragInput and dragging then
-            local delta = input.Position - dragStart
-            mainFrame.Position = UDim2.new(
-                startPos.X.Scale, startPos.X.Offset + delta.X,
-                startPos.Y.Scale, startPos.Y.Offset + delta.Y
-            )
-        end
-    end)
-    
-    -- Header
-    local header = Instance.new("Frame")
-    header.Size = UDim2.new(1, 0, 0, 35)
-    header.BackgroundColor3 = Color3.fromRGB(200, 40, 40)
-    header.BorderSizePixel = 0
-    header.Parent = mainFrame
-    
-    local headerCorner = Instance.new("UICorner")
-    headerCorner.CornerRadius = UDim.new(0, 8)
-    headerCorner.Parent = header
-    
-    local headerFix = Instance.new("Frame")
-    headerFix.Size = UDim2.new(1, 0, 0, 8)
-    headerFix.Position = UDim2.new(0, 0, 1, -8)
-    headerFix.BackgroundColor3 = Color3.fromRGB(200, 40, 40)
-    headerFix.BorderSizePixel = 0
-    headerFix.Parent = header
-    
-    -- Title
-    local title = Instance.new("TextLabel")
-    title.Size = UDim2.new(1, -80, 1, 0)
-    title.Position = UDim2.new(0, 12, 0, 0)
-    title.BackgroundTransparency = 1
-    title.Text = "Kill Aura"
-    title.Font = Enum.Font.GothamBold
-    title.TextSize = 15
-    title.TextColor3 = Color3.fromRGB(255, 255, 255)
-    title.TextXAlignment = Enum.TextXAlignment.Left
-    title.Parent = header
-    
-    -- Minimize Button
-    local minimizeBtn = Instance.new("TextButton")
-    minimizeBtn.Size = UDim2.new(0, 28, 0, 28)
-    minimizeBtn.Position = UDim2.new(1, -68, 0, 3.5)
-    minimizeBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
-    minimizeBtn.Text = "-"
-    minimizeBtn.Font = Enum.Font.GothamBold
-    minimizeBtn.TextSize = 18
-    minimizeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    minimizeBtn.BorderSizePixel = 0
-    minimizeBtn.Parent = header
-    
-    local minimizeCorner = Instance.new("UICorner")
-    minimizeCorner.CornerRadius = UDim.new(0, 6)
-    minimizeCorner.Parent = minimizeBtn
-    
-    -- Close Button
-    local closeBtn = Instance.new("TextButton")
-    closeBtn.Size = UDim2.new(0, 28, 0, 28)
-    closeBtn.Position = UDim2.new(1, -35, 0, 3.5)
-    closeBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
-    closeBtn.Text = "X"
-    closeBtn.Font = Enum.Font.GothamBold
-    minimizeBtn.TextSize = 16
-    closeBtn.TextSize = 16
-    closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    closeBtn.BorderSizePixel = 0
-    closeBtn.Parent = header
-    
-    local closeBtnCorner = Instance.new("UICorner")
-    closeBtnCorner.CornerRadius = UDim.new(0, 6)
-    closeBtnCorner.Parent = closeBtn
-    
-    -- Container
-    local container = Instance.new("Frame")
-    container.Name = "Container"
-    container.Size = UDim2.new(1, -20, 1, -45)
-    container.Position = UDim2.new(0, 10, 0, 40)
-    container.BackgroundTransparency = 1
-    container.Parent = mainFrame
-    
-    -- Helper function to create elements
-    local yOffset = 0
-    
-    local function createButton(text, color, callback)
-        local btn = Instance.new("TextButton")
-        btn.Size = UDim2.new(1, 0, 0, 40)
-        btn.Position = UDim2.new(0, 0, 0, yOffset)
-        btn.BackgroundColor3 = color
-        btn.Text = text
-        btn.Font = Enum.Font.GothamBold
-        btn.TextSize = 14
-        btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        btn.BorderSizePixel = 0
-        btn.Parent = container
-        
-        local corner = Instance.new("UICorner")
-        corner.CornerRadius = UDim.new(0, 6)
-        corner.Parent = btn
-        
-        btn.MouseButton1Click:Connect(callback)
-        yOffset = yOffset + 45
-        return btn
-    end
-    
-    local function createLabel(text)
-        local lbl = Instance.new("TextLabel")
-        lbl.Size = UDim2.new(1, 0, 0, 20)
-        lbl.Position = UDim2.new(0, 0, 0, yOffset)
-        lbl.BackgroundTransparency = 1
-        lbl.Text = text
-        lbl.Font = Enum.Font.Gotham
-        lbl.TextSize = 12
-        lbl.TextColor3 = Color3.fromRGB(180, 180, 180)
-        lbl.TextXAlignment = Enum.TextXAlignment.Left
-        lbl.Parent = container
-        yOffset = yOffset + 22
-        return lbl
-    end
-    
-    local function createSlider(labelText, min, max, default, callback)
-        local label = createLabel(labelText .. ": " .. default)
-        
-        local sliderBg = Instance.new("Frame")
-        sliderBg.Size = UDim2.new(1, 0, 0, 18)
-        sliderBg.Position = UDim2.new(0, 0, 0, yOffset)
-        sliderBg.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
-        sliderBg.BorderSizePixel = 0
-        sliderBg.Parent = container
-        
-        local sliderCorner = Instance.new("UICorner")
-        sliderCorner.CornerRadius = UDim.new(0, 9)
-        sliderCorner.Parent = sliderBg
-        
-        local sliderFill = Instance.new("Frame")
-        sliderFill.Size = UDim2.new((default - min) / (max - min), 0, 1, 0)
-        sliderFill.BackgroundColor3 = Color3.fromRGB(200, 40, 40)
-        sliderFill.BorderSizePixel = 0
-        sliderFill.Parent = sliderBg
-        
-        local fillCorner = Instance.new("UICorner")
-        fillCorner.CornerRadius = UDim.new(0, 9)
-        fillCorner.Parent = sliderFill
-        
-        local dragging = false
-        sliderBg.InputBegan:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.MouseButton1 then
-                dragging = true
-            end
-        end)
-        
-        UserInputService.InputEnded:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.MouseButton1 then
-                dragging = false
-            end
-        end)
-        
-        RunService.Heartbeat:Connect(function()
-            if dragging then
-                local mouse = UserInputService:GetMouseLocation()
-                local pos = sliderBg.AbsolutePosition
-                local size = sliderBg.AbsoluteSize
-                local rel = math.clamp((mouse.X - pos.X) / size.X, 0, 1)
-                local value = math.floor(min + rel * (max - min))
+            if hum and hrp and hum.Health > 0 and not isTeammate(p) then
+                local dist = (myPos - hrp.Position).Magnitude
                 
-                sliderFill.Size = UDim2.new(rel, 0, 1, 0)
-                label.Text = labelText .. ": " .. value
-                callback(value)
-            end
-        end)
-        
-        yOffset = yOffset + 25
-        return {label = label, slider = sliderBg, fill = sliderFill}
-    end
-    
-    -- Create UI Elements
-    local toggleBtn = createButton("DISABLED", Color3.fromRGB(200, 50, 50), function() end)
-    
-    local rangeSlider = createSlider("Range", 5, 50, CONFIG.Range, function(val)
-        CONFIG.Range = val
-    end)
-    
-    local delaySlider = createSlider("Delay", 1, 10, CONFIG.MinDelay * 10, function(val)
-        CONFIG.MinDelay = val / 10
-        CONFIG.MaxDelay = (val / 10) + 0.2
-    end)
-    
-    local statusLabel = createLabel("Status: Ready")
-    
-    -- Functions
-    local function getCharacter()
-        local char = player.Character
-        if not char then return nil end
-        
-        -- Verify character is valid
-        if not char.Parent then return nil end
-        if not char:FindFirstChildOfClass("Humanoid") then return nil end
-        
-        return char
-    end
-    
-    local function getHRP()
-        local char = getCharacter()
-        if not char then return nil end
-        
-        -- Support different body types
-        return char:FindFirstChild("HumanoidRootPart") 
-            or char:FindFirstChild("Torso") 
-            or char:FindFirstChild("UpperTorso")
-            or char:FindFirstChild("Head")
-    end
-    
-    function createRangeIndicator()
-        if rangeIndicator then rangeIndicator:Destroy() end
-        
-        -- Tạo vòng tròn nằm ngang bao quanh người chơi
-        rangeIndicator = Instance.new("Part")
-        rangeIndicator.Name = "RI_" .. game:GetService("HttpService"):GenerateGUID(false):sub(1, 6)
-        rangeIndicator.Anchored = true
-        rangeIndicator.CanCollide = false
-        rangeIndicator.Shape = Enum.PartType.Cylinder
-        rangeIndicator.Size = Vector3.new(0.5, CONFIG.Range * 2, CONFIG.Range * 2)
-        rangeIndicator.Transparency = ANTI_BAN.StealthMode and 1 or 0.75
-        rangeIndicator.Material = Enum.Material.Neon
-        rangeIndicator.Color = Color3.fromRGB(255, 0, 0)
-        rangeIndicator.CFrame = CFrame.new(0, 0, 0) * CFrame.Angles(0, 0, math.rad(90))
-        
-        -- Protection
-        pcall(function()
-            if setscriptable then
-                setscriptable(rangeIndicator, "Parent", true)
-            end
-        end)
-        
-        rangeIndicator.Parent = workspace
-        
-        -- Thêm outline để dễ nhìn hơn
-        local outline = Instance.new("SelectionBox")
-        outline.LineThickness = 0.05
-        outline.Color3 = Color3.fromRGB(255, 100, 100)
-        outline.SurfaceColor3 = Color3.fromRGB(255, 50, 50)
-        outline.SurfaceTransparency = 0.9
-        outline.Adornee = rangeIndicator
-        outline.Parent = rangeIndicator
-    end
-    
-    local function updateRangeIndicator()
-        local hrp = getHRP()
-        if rangeIndicator and hrp and CONFIG.ShowVisuals then
-            -- Đặt vòng tròn nằm ngang tại vị trí người chơi
-            rangeIndicator.CFrame = CFrame.new(hrp.Position) * CFrame.Angles(0, 0, math.rad(90))
-            rangeIndicator.Size = Vector3.new(0.5, CONFIG.Range * 2, CONFIG.Range * 2)
-            
-            -- Điều chỉnh độ trong suốt
-            if CONFIG.Enabled and not ANTI_BAN.StealthMode then
-                rangeIndicator.Transparency = 0.75
-            else
-                rangeIndicator.Transparency = 1
-            end
-        end
-    end
-    
-    local function isTeammate(targetPlayer)
-        if CONFIG.TargetTeammates then return false end
-        
-        -- Method 1: Check Team
-        if player.Team and targetPlayer.Team and player.Team == targetPlayer.Team then
-            return true
-        end
-        
-        -- Method 2: Check TeamColor (for games using TeamColor)
-        if player.TeamColor and targetPlayer.TeamColor and player.TeamColor == targetPlayer.TeamColor then
-            return true
-        end
-        
-        -- Method 3: Check custom team attributes
-        pcall(function()
-            local myTeam = player:GetAttribute("Team") or player:GetAttribute("team")
-            local theirTeam = targetPlayer:GetAttribute("Team") or targetPlayer:GetAttribute("team")
-            if myTeam and theirTeam and myTeam == theirTeam then
-                return true
-            end
-        end)
-        
-        return false
-    end
-    
-    local function findTargets()
-        local targets = {}
-        local hrp = getHRP()
-        if not hrp then return targets end
-        
-        for _, p in pairs(Players:GetPlayers()) do
-            if p ~= player and p.Character then
-                local char = p.Character
-                local hum = char:FindFirstChildOfClass("Humanoid")
-                local thrp = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso") or char:FindFirstChild("UpperTorso")
-                
-                if hum and thrp and hum.Health > 0 then
-                    local dist = (hrp.Position - thrp.Position).Magnitude
-                    
-                    if dist >= ANTI_BAN.SafeDistance and dist <= CONFIG.Range and not isTeammate(p) then
-                        if raycastCheck(hrp.Position, thrp.Position) then
-                            -- Kiểm tra nếu target đang nhìn khác hướng (an toàn hơn)
-                            local isLookingAway = isTargetLookingAway(thrp, hrp)
-                            
-                            table.insert(targets, {
-                                player = p,
-                                humanoid = hum,
-                                hrp = thrp,
-                                distance = dist,
-                                priority = isLookingAway and 1 or 0 -- Ưu tiên target nhìn khác hướng
-                            })
-                        end
+                if dist >= ANTIBAN.SafeDistance and dist <= CONFIG.Range then
+                    if canSeeTarget(myPos, hrp.Position) then
+                        local lookVec = hrp.CFrame.LookVector
+                        local dirToMe = (myPos - hrp.Position).Unit
+                        local priority = lookVec:Dot(dirToMe) < 0.5 and 1 or 0
+                        
+                        table.insert(targets, {
+                            player = p,
+                            hrp = hrp,
+                            distance = dist,
+                            priority = priority
+                        })
                     end
                 end
             end
         end
-        
-        return targets
     end
     
-    local function attack(target)
-        if not checkCPS() then return end
-        if not canAttackTarget(target.player) then return end
-        if shouldMissAttack() then 
-            -- Bỏ lỡ đòn để giống người thật
-            return 
-        end
-        
-        pcall(function()
-            -- Sử dụng damage của game, không thay đổi gì
-            attackCount = attackCount + 1
-            consecutiveAttacks = consecutiveAttacks + 1
-            
-            -- Set current target
-            currentTarget = target.player
-            
-            -- Lưu lịch sử tấn công
-            table.insert(attackHistory, {
-                target = target.player.Name,
-                time = tick(),
-            })
-            
-            -- Giới hạn history
-            if #attackHistory > 50 then
-                table.remove(attackHistory, 1)
+    return targets
+end
+
+-- Combat Remotes Cache
+local function updateCombatRemotes()
+    if #cache.combatRemotes > 0 then return end
+    
+    safeCall(function()
+        for _, v in pairs(ReplicatedStorage:GetDescendants()) do
+            if v:IsA("RemoteEvent") then
+                local name = v.Name:lower()
+                if name:match("damage") or name:match("attack") or name:match("hit")
+                   or name:match("combat") or name:match("punch") or name:match("shoot") then
+                    table.insert(cache.combatRemotes, v)
+                end
             end
-        end)
-        
-        local char = getCharacter()
-        if not char then return end
-        
-        -- Method 1: Activate tool
-        local tool = char:FindFirstChildOfClass("Tool")
+        end
+    end)
+end
+
+-- Attack
+local function attack(target)
+    if not checkCPS() or shouldMiss() then return end
+    if state.consecutive >= ANTIBAN.AttackLimit then return end
+    
+    state.attackCount = state.attackCount + 1
+    state.consecutive = state.consecutive + 1
+    state.currentTarget = target.player
+    
+    -- Method 1: Tool activation
+    safeCall(function()
+        local tool = cache.character:FindFirstChildOfClass("Tool")
         if tool then
-            pcall(function() 
-                tool:Activate()
-            end)
+            tool:Activate()
             
-            -- Try to find and fire remotes in tool
+            -- Fire tool remotes
             for _, v in pairs(tool:GetDescendants()) do
                 if v:IsA("RemoteEvent") then
-                    pcall(function()
-                        -- Common remote patterns
-                        v:FireServer(target.hrp)
-                        v:FireServer(target.hrp, target.humanoid)
-                        v:FireServer({Target = target.hrp})
-                        v:FireServer({Hit = target.hrp, Humanoid = target.humanoid})
-                    end)
+                    safeCall(v.FireServer, v, target.hrp)
+                    safeCall(v.FireServer, v, {Target = target.hrp})
                 elseif v:IsA("RemoteFunction") then
-                    pcall(function()
-                        v:InvokeServer(target.hrp)
-                        v:InvokeServer(target.hrp, target.humanoid)
-                    end)
+                    safeCall(v.InvokeServer, v, target.hrp)
                 end
             end
         end
-        
-        -- Method 2: Try to find game combat remotes
-        pcall(function()
-            for _, remote in pairs(ReplicatedStorage:GetDescendants()) do
-                if remote:IsA("RemoteEvent") then
-                    local name = remote.Name:lower()
-                    -- Common combat remote names
-                    if name:match("damage") or name:match("attack") or name:match("hit") 
-                       or name:match("combat") or name:match("punch") or name:match("sword")
-                       or name:match("shoot") or name:match("fire") or name:match("slash") then
-                        pcall(function()
-                            remote:FireServer(target.hrp)
-                            remote:FireServer(target.player)
-                            remote:FireServer(target.hrp, 100)
-                            remote:FireServer({Target = target.hrp})
-                        end)
-                    end
-                end
-            end
-        end)
-        
-        -- Method 3: Mouse click simulation at target position
-        pcall(function()
-            local mouse = player:GetMouse()
-            if mouse then
-                mouse.Hit = target.hrp.CFrame
-                mousemoverel = mousemoverel or mouse1click
-                if mouse1click then
-                    mouse1click()
-                end
-            end
-        end)
-        
-        -- Method 4: Check for combat modules in game
-        pcall(function()
-            for _, module in pairs(game:GetDescendants()) do
-                if module:IsA("ModuleScript") then
-                    local name = module.Name:lower()
-                    if name:match("combat") or name:match("damage") or name:match("weapon") then
-                        local success, mod = pcall(require, module)
-                        if success and type(mod) == "table" then
-                            -- Try common function names
-                            for funcName, func in pairs(mod) do
-                                if type(func) == "function" then
-                                    local fname = tostring(funcName):lower()
-                                    if fname:match("damage") or fname:match("attack") or fname:match("hit") then
-                                        pcall(func, target.hrp)
-                                        pcall(func, target.player)
-                                        pcall(func, target.humanoid)
-                                    end
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-        end)
+    end)
+    
+    -- Method 2: Cached combat remotes
+    updateCombatRemotes()
+    for _, remote in pairs(cache.combatRemotes) do
+        safeCall(remote.FireServer, remote, target.hrp)
+        safeCall(remote.FireServer, remote, target.player)
     end
     
-    -- Toggle Function
-    local function toggle()
-        CONFIG.Enabled = not CONFIG.Enabled
-        
-        if CONFIG.Enabled then
-            toggleBtn.Text = "ENABLED"
-            toggleBtn.BackgroundColor3 = Color3.fromRGB(40, 180, 40)
-            if CONFIG.ShowVisuals and not rangeIndicator then
-                createRangeIndicator()
-            end
-        else
-            toggleBtn.Text = "DISABLED"
-            toggleBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-        end
-    end
-    
-    toggleBtn.MouseButton1Click:Connect(toggle)
-    
-    -- Minimize button logic
-    local isMinimized = false
-    local fullSize = mainFrame.Size
-    local minSize = UDim2.new(0, 280, 0, 35)
-    
-    minimizeBtn.MouseButton1Click:Connect(function()
-        isMinimized = not isMinimized
-        if isMinimized then
-            mainFrame.Size = minSize
-            container.Visible = false
-            minimizeBtn.Text = "+"
-        else
-            mainFrame.Size = fullSize
-            container.Visible = true
-            minimizeBtn.Text = "-"
+    -- Method 3: Mouse simulation
+    safeCall(function()
+        local mouse = player:GetMouse()
+        if mouse then
+            mouse.Hit = target.hrp.CFrame
+            mouse1click()
         end
     end)
-    
-    closeBtn.MouseButton1Click:Connect(function()
-        screenGui:Destroy()
-        if rangeIndicator then rangeIndicator:Destroy() end
-    end)
-    
-    -- Keybind
-    UserInputService.InputBegan:Connect(function(input, processed)
-        if not processed and input.KeyCode == CONFIG.ToggleKey then
-            screenGui.Enabled = not screenGui.Enabled
-        end
-    end)
-    
-    -- Main Loop
-    RunService.Heartbeat:Connect(function()
-        if CONFIG.Enabled then
-            updateRangeIndicator()
-            
-            -- Kiểm tra cooldown period
-            if checkCooldown() then
-                statusLabel.Text = "Cooling down..."
-                return
-            end
-            
-            local currentTime = tick()
-            local delay = getRandomDelay()
-            
-            if currentTime - lastAttackTime >= delay then
-                local targets = findTargets()
-                
-                -- Reset consecutive attacks nếu không có target
-                if #targets == 0 then
-                    consecutiveAttacks = 0
-                    currentTarget = nil
-                end
-                
-                statusLabel.Text = "Active | Targets: " .. #targets
-                
-                if #targets > 0 then
-                    -- Sort theo priority và distance
-                    table.sort(targets, function(a, b)
-                        if a.priority ~= b.priority then
-                            return a.priority > b.priority
-                        end
-                        return a.distance < b.distance
-                    end)
-                    
-                    attack(targets[1])
-                    lastAttackTime = currentTime
-                    
-                    -- Reset consecutive attacks sau một khoảng thời gian
-                    if consecutiveAttacks >= CONFIG.AttackLimit then
-                        wait(math.random(1, 2)) -- Nghỉ 1-2 giây
-                        consecutiveAttacks = 0
-                        currentTarget = nil
-                    end
-                end
-            end
-        else
-            consecutiveAttacks = 0
-            currentTarget = nil
-            statusLabel.Text = "Disabled"
-        end
-    end)
-    
-    -- Character respawn with retry logic
-    player.CharacterAdded:Connect(function(newChar)
-        local function setupCharacter()
-            task.wait(0.5)
-            
-            -- Wait for character to fully load
-            local hrp = newChar:WaitForChild("HumanoidRootPart", 5)
-            if not hrp then return end
-            
-            local hum = newChar:WaitForChild("Humanoid", 5)
-            if not hum then return end
-            
-            -- Recreate range indicator
-            if CONFIG.ShowVisuals then
-                createRangeIndicator()
-            end
-        end
-        
-        pcall(setupCharacter)
-    end)
-    
-    -- Initialize with retry
-    local function initialize()
-        task.wait(1) -- Wait for game to load
-        
-        -- Ensure character is loaded
-        if not player.Character then
-            player.CharacterAdded:Wait()
-        end
-        
-        task.wait(0.5)
-        
-        if CONFIG.ShowVisuals then
-            createRangeIndicator()
-        end
-        
-        print("Kill Aura loaded successfully!")
-        print("Press K to toggle GUI")
-    end
-    
-    task.spawn(initialize)
-    
-    -- Cleanup on script unload
-    if getgenv then
-        getgenv().KillAuraCleanup = function()
-            CONFIG.Enabled = false
-            pcall(function() screenGui:Destroy() end)
-            pcall(function() if rangeIndicator then rangeIndicator:Destroy() end end)
-            print("Kill Aura cleaned up")
-        end
+end
+
+-- GUI
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "KA_" .. HttpService:GenerateGUID(false):sub(1, 8)
+screenGui.ResetOnSpawn = false
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+screenGui.IgnoreGuiInset = true
+
+protectgui(screenGui)
+
+-- Cleanup old GUIs
+for _, gui in pairs(playerGui:GetChildren()) do
+    if gui.Name:match("KA_") then
+        safeCall(gui.Destroy, gui)
     end
 end
 
--- Protected call with multiple fallbacks
-local success, err = pcall(loadScript)
-if not success then
-    local success2, err2 = xpcall(loadScript, function(e)
-        return debug.traceback(e)
+screenGui.Parent = playerGui
+
+-- Main Frame
+local main = Instance.new("Frame")
+main.Size = UDim2.new(0, 260, 0, 200)
+main.Position = UDim2.new(0.5, -130, 0.3, 0)
+main.BackgroundColor3 = Color3.fromRGB(18, 18, 25)
+main.BorderSizePixel = 0
+main.Active = true
+main.Parent = screenGui
+
+Instance.new("UICorner", main).CornerRadius = UDim.new(0, 8)
+Instance.new("UIStroke", main).Color = Color3.fromRGB(180, 30, 30)
+
+local grad = Instance.new("UIGradient", main)
+grad.Color = ColorSequence.new{
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(22, 22, 30)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(14, 14, 20))
+}
+grad.Rotation = 90
+
+-- Dragging
+local dragging, dragInput, dragStart, startPos
+
+main.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = true
+        dragStart = input.Position
+        startPos = main.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end)
+
+main.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement then
+        dragInput = input
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragging then
+        local delta = input.Position - dragStart
+        main.Position = UDim2.new(
+            startPos.X.Scale, startPos.X.Offset + delta.X,
+            startPos.Y.Scale, startPos.Y.Offset + delta.Y
+        )
+    end
+end)
+
+-- Header
+local header = Instance.new("Frame", main)
+header.Size = UDim2.new(1, 0, 0, 32)
+header.BackgroundColor3 = Color3.fromRGB(180, 30, 30)
+header.BorderSizePixel = 0
+
+Instance.new("UICorner", header).CornerRadius = UDim.new(0, 8)
+local headerFix = Instance.new("Frame", header)
+headerFix.Size = UDim2.new(1, 0, 0, 8)
+headerFix.Position = UDim2.new(0, 0, 1, -8)
+headerFix.BackgroundColor3 = Color3.fromRGB(180, 30, 30)
+headerFix.BorderSizePixel = 0
+
+local title = Instance.new("TextLabel", header)
+title.Size = UDim2.new(1, -70, 1, 0)
+title.Position = UDim2.new(0, 10, 0, 0)
+title.BackgroundTransparency = 1
+title.Text = "Kill Aura"
+title.Font = Enum.Font.GothamBold
+title.TextSize = 14
+title.TextColor3 = Color3.fromRGB(255, 255, 255)
+title.TextXAlignment = Enum.TextXAlignment.Left
+
+-- Minimize Button
+local minBtn = Instance.new("TextButton", header)
+minBtn.Size = UDim2.new(0, 26, 0, 26)
+minBtn.Position = UDim2.new(1, -60, 0, 3)
+minBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
+minBtn.Text = "-"
+minBtn.Font = Enum.Font.GothamBold
+minBtn.TextSize = 16
+minBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+minBtn.BorderSizePixel = 0
+
+Instance.new("UICorner", minBtn).CornerRadius = UDim.new(0, 5)
+
+-- Close Button
+local closeBtn = Instance.new("TextButton", header)
+closeBtn.Size = UDim2.new(0, 26, 0, 26)
+closeBtn.Position = UDim2.new(1, -30, 0, 3)
+closeBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
+closeBtn.Text = "X"
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.TextSize = 14
+closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeBtn.BorderSizePixel = 0
+
+Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 5)
+
+-- Container
+local container = Instance.new("Frame", main)
+container.Size = UDim2.new(1, -16, 1, -40)
+container.Position = UDim2.new(0, 8, 0, 36)
+container.BackgroundTransparency = 1
+
+-- Toggle Button
+local toggleBtn = Instance.new("TextButton", container)
+toggleBtn.Size = UDim2.new(1, 0, 0, 36)
+toggleBtn.BackgroundColor3 = Color3.fromRGB(180, 40, 40)
+toggleBtn.Text = "DISABLED"
+toggleBtn.Font = Enum.Font.GothamBold
+toggleBtn.TextSize = 13
+toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleBtn.BorderSizePixel = 0
+
+Instance.new("UICorner", toggleBtn).CornerRadius = UDim.new(0, 6)
+
+-- Range Label
+local rangeLabel = Instance.new("TextLabel", container)
+rangeLabel.Size = UDim2.new(1, 0, 0, 18)
+rangeLabel.Position = UDim2.new(0, 0, 0, 42)
+rangeLabel.BackgroundTransparency = 1
+rangeLabel.Text = "Range: " .. CONFIG.Range
+rangeLabel.Font = Enum.Font.Gotham
+rangeLabel.TextSize = 11
+rangeLabel.TextColor3 = Color3.fromRGB(170, 170, 170)
+rangeLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+-- Range Slider
+local rangeSliderBg = Instance.new("Frame", container)
+rangeSliderBg.Size = UDim2.new(1, 0, 0, 16)
+rangeSliderBg.Position = UDim2.new(0, 0, 0, 62)
+rangeSliderBg.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
+rangeSliderBg.BorderSizePixel = 0
+
+Instance.new("UICorner", rangeSliderBg).CornerRadius = UDim.new(0, 8)
+
+local rangeFill = Instance.new("Frame", rangeSliderBg)
+rangeFill.Size = UDim2.new(CONFIG.Range / 50, 0, 1, 0)
+rangeFill.BackgroundColor3 = Color3.fromRGB(180, 30, 30)
+rangeFill.BorderSizePixel = 0
+
+Instance.new("UICorner", rangeFill).CornerRadius = UDim.new(0, 8)
+
+-- Delay Label
+local delayLabel = Instance.new("TextLabel", container)
+delayLabel.Size = UDim2.new(1, 0, 0, 18)
+delayLabel.Position = UDim2.new(0, 0, 0, 84)
+delayLabel.BackgroundTransparency = 1
+delayLabel.Text = "Delay: " .. CONFIG.Delay
+delayLabel.Font = Enum.Font.Gotham
+delayLabel.TextSize = 11
+delayLabel.TextColor3 = Color3.fromRGB(170, 170, 170)
+delayLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+-- Delay Slider
+local delaySliderBg = Instance.new("Frame", container)
+delaySliderBg.Size = UDim2.new(1, 0, 0, 16)
+delaySliderBg.Position = UDim2.new(0, 0, 0, 104)
+delaySliderBg.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
+delaySliderBg.BorderSizePixel = 0
+
+Instance.new("UICorner", delaySliderBg).CornerRadius = UDim.new(0, 8)
+
+local delayFill = Instance.new("Frame", delaySliderBg)
+delayFill.Size = UDim2.new(CONFIG.Delay / 0.5, 0, 1, 0)
+delayFill.BackgroundColor3 = Color3.fromRGB(180, 30, 30)
+delayFill.BorderSizePixel = 0
+
+Instance.new("UICorner", delayFill).CornerRadius = UDim.new(0, 8)
+
+-- Status Label
+local statusLabel = Instance.new("TextLabel", container)
+statusLabel.Size = UDim2.new(1, 0, 0, 18)
+statusLabel.Position = UDim2.new(0, 0, 0, 126)
+statusLabel.BackgroundTransparency = 1
+statusLabel.Text = "Ready"
+statusLabel.Font = Enum.Font.Gotham
+statusLabel.TextSize = 11
+statusLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+statusLabel.TextXAlignment = Enum.TextXAlignment.Center
+
+-- Range Slider Logic
+local rangeDragging = false
+rangeSliderBg.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        rangeDragging = true
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        rangeDragging = false
+    end
+end)
+
+-- Delay Slider Logic
+local delayDragging = false
+delaySliderBg.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        delayDragging = true
+    end
+end)
+
+-- Range Indicator
+local function createRangeIndicator()
+    if state.rangeIndicator then
+        safeCall(state.rangeIndicator.Destroy, state.rangeIndicator)
+    end
+    
+    local part = Instance.new("Part")
+    part.Name = "RI_" .. HttpService:GenerateGUID(false):sub(1, 6)
+    part.Anchored = true
+    part.CanCollide = false
+    part.Shape = Enum.PartType.Cylinder
+    part.Size = Vector3.new(0.4, CONFIG.Range * 2, CONFIG.Range * 2)
+    part.Transparency = 0.75
+    part.Material = Enum.Material.Neon
+    part.Color = Color3.fromRGB(255, 0, 0)
+    part.CFrame = CFrame.new(0, 0, 0) * CFrame.Angles(0, 0, math.rad(90))
+    part.Parent = workspace
+    
+    local outline = Instance.new("SelectionBox", part)
+    outline.LineThickness = 0.04
+    outline.Color3 = Color3.fromRGB(255, 80, 80)
+    outline.SurfaceTransparency = 0.9
+    outline.Adornee = part
+    
+    state.rangeIndicator = part
+end
+
+local function updateRangeIndicator()
+    if not state.rangeIndicator or not CONFIG.ShowVisuals then return end
+    
+    local hrp = getHRP()
+    if hrp then
+        state.rangeIndicator.CFrame = CFrame.new(hrp.Position) * CFrame.Angles(0, 0, math.rad(90))
+        state.rangeIndicator.Size = Vector3.new(0.4, CONFIG.Range * 2, CONFIG.Range * 2)
+        state.rangeIndicator.Transparency = CONFIG.Enabled and 0.75 or 1
+    end
+end
+
+-- Toggle
+local function toggle()
+    CONFIG.Enabled = not CONFIG.Enabled
+    
+    if CONFIG.Enabled then
+        toggleBtn.Text = "ENABLED"
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(30, 160, 30)
+        if not state.rangeIndicator then
+            createRangeIndicator()
+        end
+    else
+        toggleBtn.Text = "DISABLED"
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(180, 40, 40)
+        state.consecutive = 0
+        state.currentTarget = nil
+    end
+end
+
+toggleBtn.MouseButton1Click:Connect(toggle)
+
+-- Minimize
+local isMinimized = false
+local fullSize = main.Size
+
+minBtn.MouseButton1Click:Connect(function()
+    isMinimized = not isMinimized
+    if isMinimized then
+        main.Size = UDim2.new(0, 260, 0, 32)
+        container.Visible = false
+        minBtn.Text = "+"
+    else
+        main.Size = fullSize
+        container.Visible = true
+        minBtn.Text = "-"
+    end
+end)
+
+-- Close
+closeBtn.MouseButton1Click:Connect(function()
+    CONFIG.Enabled = false
+    safeCall(screenGui.Destroy, screenGui)
+    if state.rangeIndicator then
+        safeCall(state.rangeIndicator.Destroy, state.rangeIndicator)
+    end
+end)
+
+-- Toggle GUI
+UserInputService.InputBegan:Connect(function(input, processed)
+    if not processed and input.KeyCode == CONFIG.ToggleKey then
+        screenGui.Enabled = not screenGui.Enabled
+    end
+end)
+
+-- Main Loop
+RunService.Heartbeat:Connect(function()
+    -- Update sliders
+    if rangeDragging then
+        local mouse = UserInputService:GetMouseLocation()
+        local pos = rangeSliderBg.AbsolutePosition
+        local size = rangeSliderBg.AbsoluteSize
+        local rel = math.clamp((mouse.X - pos.X) / size.X, 0, 1)
+        CONFIG.Range = math.floor(rel * 45 + 5)
+        rangeFill.Size = UDim2.new(rel, 0, 1, 0)
+        rangeLabel.Text = "Range: " .. CONFIG.Range
+    end
+    
+    if delayDragging then
+        local mouse = UserInputService:GetMouseLocation()
+        local pos = delaySliderBg.AbsolutePosition
+        local size = delaySliderBg.AbsoluteSize
+        local rel = math.clamp((mouse.X - pos.X) / size.X, 0, 1)
+        CONFIG.Delay = math.floor(rel * 50) / 100
+        delayFill.Size = UDim2.new(rel, 0, 1, 0)
+        delayLabel.Text = "Delay: " .. CONFIG.Delay
+    end
+    
+    if not CONFIG.Enabled then
+        statusLabel.Text = "Disabled"
+        return
+    end
+    
+    updateRangeIndicator()
+    
+    if checkCooldown() then
+        statusLabel.Text = "Cooldown..."
+        return
+    end
+    
+    local now = tick()
+    if now - state.lastAttack < getRandomDelay() then return end
+    
+    local targets = findTargets()
+    
+    if #targets == 0 then
+        state.consecutive = 0
+        state.currentTarget = nil
+        statusLabel.Text = "No targets"
+        return
+    end
+    
+    table.sort(targets, function(a, b)
+        if a.priority ~= b.priority then
+            return a.priority > b.priority
+        end
+        return a.distance < b.distance
     end)
-    if not success2 then
-        warn("Error loading Kill Aura:", err2 or err)
+    
+    attack(targets[1])
+    state.lastAttack = now
+    statusLabel.Text = "Active | " .. #targets .. " targets"
+    
+    if state.consecutive >= ANTIBAN.AttackLimit then
+        task.wait(math.random(1, 2))
+        state.consecutive = 0
+        state.currentTarget = nil
+    end
+end)
+
+-- Character respawn
+player.CharacterAdded:Connect(function()
+    cache.character = nil
+    cache.hrp = nil
+    task.wait(1)
+    updateCache()
+    if CONFIG.ShowVisuals then
+        createRangeIndicator()
+    end
+end)
+
+-- Initialize
+task.spawn(function()
+    task.wait(1)
+    updateCache()
+    if CONFIG.ShowVisuals then
+        createRangeIndicator()
+    end
+    print("Kill Aura loaded!")
+    print("Press K to toggle")
+end)
+
+-- Cleanup
+if getgenv then
+    getgenv().KillAuraCleanup = function()
+        CONFIG.Enabled = false
+        safeCall(screenGui.Destroy, screenGui)
+        if state.rangeIndicator then
+            safeCall(state.rangeIndicator.Destroy, state.rangeIndicator)
+        end
     end
 end

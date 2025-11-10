@@ -318,6 +318,7 @@ local function createGUI()
     end
     
     local m = Instance.new("Frame", sg)
+    m.Name = "Main"
     m.Size = UDim2.new(0, 400, 0, 180)
     m.Position = UDim2.new(0.5, -200, 0.5, -90)
     m.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
@@ -325,10 +326,26 @@ local function createGUI()
     
     Instance.new("UICorner", m).CornerRadius = UDim.new(0, 10)
     
+    -- Title bar
+    local titleBar = Instance.new("Frame", m)
+    titleBar.Name = "TitleBar"
+    titleBar.Size = UDim2.new(1, 0, 0, 35)
+    titleBar.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+    titleBar.BorderSizePixel = 0
+    
+    Instance.new("UICorner", titleBar).CornerRadius = UDim.new(0, 10)
+    
+    -- Cover bottom of title bar
+    local cover = Instance.new("Frame", titleBar)
+    cover.Size = UDim2.new(1, 0, 0, 10)
+    cover.Position = UDim2.new(0, 0, 1, -10)
+    cover.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+    cover.BorderSizePixel = 0
+    
     -- Title
-    local t = Instance.new("TextLabel", m)
-    t.Size = UDim2.new(1, -60, 0, 35)
-    t.Position = UDim2.new(0, 10, 0, 5)
+    local t = Instance.new("TextLabel", titleBar)
+    t.Size = UDim2.new(1, -80, 1, 0)
+    t.Position = UDim2.new(0, 10, 0, 0)
     t.BackgroundTransparency = 1
     t.Text = "AC SCANNER"
     t.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -336,23 +353,42 @@ local function createGUI()
     t.Font = Enum.Font.GothamBold
     t.TextXAlignment = Enum.TextXAlignment.Left
     
-    -- Close
-    local close = Instance.new("TextButton", m)
-    close.Size = UDim2.new(0, 30, 0, 30)
-    close.Position = UDim2.new(1, -38, 0, 5)
+    -- Minimize button
+    local minimize = Instance.new("TextButton", titleBar)
+    minimize.Name = "Minimize"
+    minimize.Size = UDim2.new(0, 30, 0, 28)
+    minimize.Position = UDim2.new(1, -68, 0, 3.5)
+    minimize.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    minimize.Text = "-"
+    minimize.TextColor3 = Color3.fromRGB(255, 255, 255)
+    minimize.TextSize = 18
+    minimize.Font = Enum.Font.GothamBold
+    Instance.new("UICorner", minimize).CornerRadius = UDim.new(0, 6)
+    
+    -- Close button
+    local close = Instance.new("TextButton", titleBar)
+    close.Name = "Close"
+    close.Size = UDim2.new(0, 30, 0, 28)
+    close.Position = UDim2.new(1, -35, 0, 3.5)
     close.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
     close.Text = "X"
     close.TextColor3 = Color3.fromRGB(255, 255, 255)
     close.TextSize = 14
     close.Font = Enum.Font.GothamBold
     Instance.new("UICorner", close).CornerRadius = UDim.new(0, 6)
-    close.MouseButton1Click:Connect(function() sg:Destroy() end)
+    
+    -- Content frame
+    local content = Instance.new("Frame", m)
+    content.Name = "Content"
+    content.Size = UDim2.new(1, 0, 1, -35)
+    content.Position = UDim2.new(0, 0, 0, 35)
+    content.BackgroundTransparency = 1
     
     -- Status
-    local st = Instance.new("TextLabel", m)
+    local st = Instance.new("TextLabel", content)
     st.Name = "Status"
     st.Size = UDim2.new(1, -20, 0, 25)
-    st.Position = UDim2.new(0, 10, 0, 45)
+    st.Position = UDim2.new(0, 10, 0, 10)
     st.BackgroundTransparency = 1
     st.Text = "Ready | Auto-Remove: ON"
     st.TextColor3 = Color3.fromRGB(100, 255, 100)
@@ -361,10 +397,10 @@ local function createGUI()
     st.TextXAlignment = Enum.TextXAlignment.Left
     
     -- Info
-    local info = Instance.new("TextLabel", m)
+    local info = Instance.new("TextLabel", content)
     info.Name = "Info"
     info.Size = UDim2.new(1, -20, 0, 40)
-    info.Position = UDim2.new(0, 10, 0, 75)
+    info.Position = UDim2.new(0, 10, 0, 40)
     info.BackgroundTransparency = 1
     info.Text = "Removed: 0\nDisabled: 0\nBlocked: 0"
     info.TextColor3 = Color3.fromRGB(180, 180, 180)
@@ -374,7 +410,7 @@ local function createGUI()
     info.TextYAlignment = Enum.TextYAlignment.Top
     
     -- Button
-    local scan = Instance.new("TextButton", m)
+    local scan = Instance.new("TextButton", content)
     scan.Name = "Scan"
     scan.Size = UDim2.new(1, -20, 0, 40)
     scan.Position = UDim2.new(0, 10, 1, -48)
@@ -385,9 +421,42 @@ local function createGUI()
     scan.Font = Enum.Font.GothamBold
     Instance.new("UICorner", scan).CornerRadius = UDim.new(0, 8)
     
-    -- Drag
+    -- Close functionality
+    close.MouseButton1Click:Connect(function()
+        sg:Destroy()
+    end)
+    
+    -- Minimize functionality
+    local minimized = false
+    minimize.MouseButton1Click:Connect(function()
+        minimized = not minimized
+        
+        if minimized then
+            m:TweenSize(
+                UDim2.new(0, 400, 0, 35),
+                Enum.EasingDirection.Out,
+                Enum.EasingStyle.Quad,
+                0.3,
+                true
+            )
+            minimize.Text = "+"
+            content.Visible = false
+        else
+            m:TweenSize(
+                UDim2.new(0, 400, 0, 180),
+                Enum.EasingDirection.Out,
+                Enum.EasingStyle.Quad,
+                0.3,
+                true
+            )
+            minimize.Text = "-"
+            content.Visible = true
+        end
+    end)
+    
+    -- Drag (on title bar only)
     local drag, inp, dstart, spos
-    m.InputBegan:Connect(function(i)
+    titleBar.InputBegan:Connect(function(i)
         if i.UserInputType == Enum.UserInputType.MouseButton1 then
             drag = true
             dstart = i.Position
@@ -398,7 +467,7 @@ local function createGUI()
         end
     end)
     
-    m.InputChanged:Connect(function(i)
+    titleBar.InputChanged:Connect(function(i)
         if i.UserInputType == Enum.UserInputType.MouseMovement then inp = i end
     end)
     
@@ -411,7 +480,7 @@ local function createGUI()
         end)
     end
     
-    return {GUI = sg, Main = m, Status = st, Info = info, Scan = scan}
+    return {GUI = sg, Main = m, Status = st, Info = info, Scan = scan, Content = content}
 end
 
 -- Init

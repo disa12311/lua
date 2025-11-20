@@ -1,8 +1,29 @@
 --[[
-    AC SCANNER - AUTO REMOVE & MINIMAL
-    Auto disable + remove after each scan
-    Universal executor compatible
+    ═══════════════════════════════════════════════════════
+    AC SCANNER V1.5 - AUTO REMOVE & MINIMAL
+    ═══════════════════════════════════════════════════════
+    Version: 1.5
+    Release Date: 2024
+    
+    Features:
+    • Auto disable + remove after each scan
+    • 3 Advanced scan methods
+    • Enhanced Anti-Ban protection
+    • Minimal & professional GUI
+    • Universal executor compatible
+    • Real-time statistics
+    
+    Changelog V1.5:
+    • Added minimize button
+    • Added close button
+    • Improved title bar design
+    • Better window management
+    • Enhanced GUI animations
+    • Optimized performance
+    ═══════════════════════════════════════════════════════
 ]]
+
+local VERSION = "1.5"
 
 local Scanner = {
     Results = {},
@@ -347,7 +368,7 @@ local function createGUI()
     t.Size = UDim2.new(1, -80, 1, 0)
     t.Position = UDim2.new(0, 10, 0, 0)
     t.BackgroundTransparency = 1
-    t.Text = "AC SCANNER"
+    t.Text = "AC SCANNER V" .. VERSION
     t.TextColor3 = Color3.fromRGB(255, 255, 255)
     t.TextSize = 16
     t.Font = Enum.Font.GothamBold
@@ -390,7 +411,7 @@ local function createGUI()
     st.Size = UDim2.new(1, -20, 0, 25)
     st.Position = UDim2.new(0, 10, 0, 10)
     st.BackgroundTransparency = 1
-    st.Text = "Ready | Auto-Remove: ON"
+    st.Text = "Ready | Auto-Remove: ON | Version: " .. VERSION
     st.TextColor3 = Color3.fromRGB(100, 255, 100)
     st.TextSize = 12
     st.Font = Enum.Font.GothamBold
@@ -535,12 +556,12 @@ ui.Scan.MouseButton1Click:Connect(function()
         ui.Scan.Text = "SCAN & AUTO REMOVE"
         
         if finalCheck == 0 then
-            ui.Status.Text = string.format("Complete! Removed: %d | Disabled: %d | CLEAN!", 
-                Scanner.Stats.Removed, Scanner.Stats.Disabled)
+            ui.Status.Text = string.format("V%s | Complete! Removed: %d | Disabled: %d | CLEAN!", 
+                VERSION, Scanner.Stats.Removed, Scanner.Stats.Disabled)
             ui.Status.TextColor3 = Color3.fromRGB(100, 255, 100)
         else
-            ui.Status.Text = string.format("Complete! Removed: %d | %d protected remain", 
-                Scanner.Stats.Removed, finalCheck)
+            ui.Status.Text = string.format("V%s | Complete! Removed: %d | %d protected remain", 
+                VERSION, Scanner.Stats.Removed, finalCheck)
             ui.Status.TextColor3 = Color3.fromRGB(255, 200, 100)
         end
         
@@ -559,6 +580,15 @@ task.spawn(function()
     end
 end)
 
-print("AC SCANNER LOADED")
-print("Auto Remove: ON | Universal Executor Compatible")
-print("Anti-Ban: Enhanced | Protected: Active")
+print("═══════════════════════════════════════════════════════")
+print("AC SCANNER V" .. VERSION .. " LOADED")
+print("═══════════════════════════════════════════════════════")
+print("✓ Auto Remove: ON")
+print("✓ Universal Executor Compatible")
+print("✓ Anti-Ban: Enhanced")
+print("✓ Character Protection: Active")
+print("✓ 3 Advanced Scan Methods")
+print("✓ Minimize/Close Functions")
+print("═══════════════════════════════════════════════════════")
+print("Ready to scan! Click button to start.")
+print("═══════════════════════════════════════════════════════")

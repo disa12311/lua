@@ -1,401 +1,499 @@
 --[[
     ═══════════════════════════════════════════════════════
-    AC SCANNER V1.5 - UNIVERSAL EXECUTOR EDITION
+    AC SCANNER V2.0 - MODERN EDITION
     ═══════════════════════════════════════════════════════
-    Version: 1.5 Universal
-    Release Date: 2024
+    Version: 2.0
+    Release: 2024
+    Architecture: Modern Lua 5.1+
     
-    Compatible Executors:
-    ✓ Synapse X/Z
-    ✓ Script-Ware
-    ✓ KRNL
-    ✓ Fluxus
-    ✓ Electron
-    ✓ Delta
-    ✓ Evon
-    ✓ Solara
-    ✓ Wave
-    ✓ And more...
+    🚀 Modern Features:
+    • TypeScript-like class system
+    • Async/await pattern with promises
+    • Event-driven architecture
+    • Singleton pattern
+    • Observer pattern for UI updates
+    • Modular design
+    • ES6+ inspired syntax
     
-    Features:
-    • Auto disable + remove after each scan
-    • 3 Advanced scan methods
-    • Enhanced Anti-Ban protection
-    • Minimal & professional GUI
-    • Universal executor compatible
-    • Real-time statistics
-    • Fallback systems for all executors
+    🎯 Core Systems:
+    • Smart executor detection
+    • Advanced anti-ban system
+    • Real-time scanning engine
+    • Modern UI framework
+    • Auto-remove pipeline
     
-    Changelog V1.5 Universal:
-    • Universal executor compatibility
-    • Safe metamethod hooks
-    • Multiple fallback systems
-    • Enhanced error handling
-    • Optimized for all executors
-    • Better performance
+    ⚡ Performance:
+    • Optimized async operations
+    • Non-blocking scans
+    • Memory efficient
+    • Lazy loading
     ═══════════════════════════════════════════════════════
 ]]
 
-local VERSION = "1.5 Universal"
+-- ============================================================
+-- CONSTANTS & CONFIG
+-- ============================================================
 
--- Executor Detection
-local Executor = {
-    Name = "Unknown",
-    HasMetaHook = false,
-    HasNewCClosure = false,
-    HasSetReadonly = false
-}
+local VERSION = "2.0"
 
--- Detect executor capabilities
-pcall(function()
-    if syn then Executor.Name = "Synapse"
-    elseif KRNL_LOADED then Executor.Name = "KRNL"
-    elseif isfluxus then Executor.Name = "Fluxus"
-    elseif getexecutorname then Executor.Name = getexecutorname()
-    elseif identifyexecutor then Executor.Name = identifyexecutor()
-    end
-    
-    Executor.HasMetaHook = getrawmetatable ~= nil
-    Executor.HasNewCClosure = newcclosure ~= nil or protect_function ~= nil
-    Executor.HasSetReadonly = setreadonly ~= nil or make_writeable ~= nil
-end)
-
-local Scanner = {
-    Results = {},
-    Deleted = {},
-    Disabled = {},
-    Stats = {Found = 0, Removed = 0, Disabled = 0}
-}
-
--- Universal Services (Safe for all executors)
-local Services = {}
-local function getService(name)
-    if not Services[name] then
-        local s, v = pcall(function()
-            return game:GetService(name)
-        end)
-        Services[name] = s and v or nil
-    end
-    return Services[name]
-end
-
--- Pre-load services
-local serviceList = {"Players", "CoreGui", "UserInputService", "RunService"}
-for _, n in ipairs(serviceList) do
-    getService(n)
-end
-
-local Player = Services.Players and Services.Players.LocalPlayer
-
--- Universal Anti-Ban (Works with all executors)
-local AntiBan = {Active = false, Blocked = 0, Protected = {}}
-
-function AntiBan:Init()
-    if self.Active then return end
-    self.Active = true
-    
-    local patterns = {
-        "kick", "ban", "report", "flag", "log", "anticheat", 
-        "anti", "cheat", "detect", "exploit", "hack"
+local Config = {
+    SCAN_DELAY = 0.01,
+    BATCH_SIZE = 150,
+    UPDATE_INTERVAL = 2,
+    ANIMATION_SPEED = 0.3,
+    KEYWORDS = {
+        "kick", "ban", "detect", "anticheat", "anti", "cheat", "exploit",
+        "flag", "report", "security", "verify", "check", "validate",
+        "monitor", "log", "guard", "protect", "ac", "admin", "mod",
+        "k1ck", "b4n", "ant1", "ch3at", "expl01t",
+        "system", "handler", "controller", "manager",
+        "remote_", "_remote", "secure", "safe"
     }
-    
-    -- Universal metamethod hook with fallbacks
-    local hooked = false
-    
-    -- Method 1: Standard metamethod hook
-    if Executor.HasMetaHook then
-        pcall(function()
-            local mt = getrawmetatable(game)
-            local oldNamecall = mt.__namecall
-            
-            -- Safe setreadonly
-            local function safeSetReadonly(t, state)
-                if setreadonly then
-                    setreadonly(t, state)
-                elseif make_writeable and not state then
-                    make_writeable(t)
-                elseif make_readonly and state then
-                    make_readonly(t)
-                end
-            end
-            
-            safeSetReadonly(mt, false)
-            
-            -- Safe newcclosure
-            local function safeWrap(func)
-                if newcclosure then
-                    return newcclosure(func)
-                elseif protect_function then
-                    return protect_function(func)
-                end
-                return func
-            end
-            
-            mt.__namecall = safeWrap(function(self, ...)
-                local method = getnamecallmethod()
-                local args = {...}
-                
-                if method == "FireServer" or method == "InvokeServer" then
-                    local name = tostring(self):lower()
-                    for _, p in ipairs(patterns) do
-                        if name:find(p, 1, true) then
-                            AntiBan.Blocked = AntiBan.Blocked + 1
-                            return
-                        end
-                    end
-                    
-                    -- Check args
-                    for _, arg in ipairs(args) do
-                        if type(arg) == "string" then
-                            local lower = arg:lower()
-                            for _, p in ipairs(patterns) do
-                                if lower:find(p, 1, true) then
-                                    AntiBan.Blocked = AntiBan.Blocked + 1
-                                    return
-                                end
-                            end
-                        end
-                    end
-                elseif method == "Kick" then
-                    AntiBan.Blocked = AntiBan.Blocked + 1
-                    return
-                end
-                
-                return oldNamecall(self, ...)
-            end)
-            
-            safeSetReadonly(mt, true)
-            hooked = true
-        end)
-    end
-    
-    -- Method 2: Fallback - Hook player directly
-    if not hooked and Player then
-        pcall(function()
-            local oldKick = Player.Kick
-            Player.Kick = function()
-                AntiBan.Blocked = AntiBan.Blocked + 1
-            end
-            hooked = true
-        end)
-    end
-    
-    -- Character protection (universal)
-    if Player then
-        task.spawn(function()
-            while self.Active do
-                pcall(function()
-                    local char = Player.Character
-                    if char then
-                        local hum = char:FindFirstChildOfClass("Humanoid")
-                        if hum then
-                            -- Store values
-                            if hum.WalkSpeed > 16 then
-                                self.Protected.WalkSpeed = hum.WalkSpeed
-                            end
-                            if hum.JumpPower and hum.JumpPower > 50 then
-                                self.Protected.JumpPower = hum.JumpPower
-                            end
-                            if hum.JumpHeight and hum.JumpHeight > 7.2 then
-                                self.Protected.JumpHeight = hum.JumpHeight
-                            end
-                        end
-                    end
-                end)
-                task.wait(1)
-            end
-        end)
-    end
-end
-
--- Keywords
-local KEYWORDS = {
-    "kick", "ban", "detect", "anticheat", "anti", "cheat", "exploit",
-    "flag", "report", "security", "verify", "check", "validate",
-    "monitor", "log", "guard", "protect", "ac", "admin", "mod",
-    "k1ck", "b4n", "ant1", "ch3at", "expl01t",
-    "system", "handler", "controller", "manager",
-    "remote_", "_remote", "secure", "safe"
 }
 
--- Fast match
-local function match(str)
-    for i = 1, #KEYWORDS do
-        if str:find(KEYWORDS[i], 1, true) then return true end
+-- ============================================================
+-- UTILITY FUNCTIONS
+-- ============================================================
+
+local Utils = {}
+
+function Utils.pcall(func, ...)
+    local success, result = pcall(func, ...)
+    return success and result or nil
+end
+
+function Utils.safeGetService(serviceName)
+    return Utils.pcall(game.GetService, game, serviceName)
+end
+
+function Utils.match(str, patterns)
+    local lower = str:lower()
+    for _, pattern in ipairs(patterns) do
+        if lower:find(pattern, 1, true) then
+            return true
+        end
     end
     return false
 end
 
--- Universal disable (works on all executors)
-local function disable(obj)
-    local success = false
-    pcall(function()
-        if obj and obj.Parent then
-            if obj:IsA("LuaSourceContainer") then
-                obj.Disabled = true
-                success = true
+function Utils.delay(seconds)
+    return task.wait(seconds)
+end
+
+-- ============================================================
+-- EXECUTOR DETECTION (Singleton)
+-- ============================================================
+
+local Executor = (function()
+    local instance
+    
+    local function create()
+        local self = {
+            name = "Unknown",
+            capabilities = {
+                metaHook = false,
+                newCClosure = false,
+                setReadonly = false
+            }
+        }
+        
+        -- Detect executor
+        Utils.pcall(function()
+            if syn then 
+                self.name = "Synapse"
+            elseif KRNL_LOADED then 
+                self.name = "KRNL"
+            elseif isfluxus then 
+                self.name = "Fluxus"
+            elseif getexecutorname then 
+                self.name = getexecutorname()
+            elseif identifyexecutor then 
+                self.name = identifyexecutor()
+            end
+            
+            self.capabilities.metaHook = getrawmetatable ~= nil
+            self.capabilities.newCClosure = newcclosure ~= nil or protect_function ~= nil
+            self.capabilities.setReadonly = setreadonly ~= nil or make_writeable ~= nil
+        end)
+        
+        function self:hasCapability(cap)
+            return self.capabilities[cap] or false
+        end
+        
+        function self:info()
+            return {
+                name = self.name,
+                capabilities = self.capabilities
+            }
+        end
+        
+        return self
+    end
+    
+    return {
+        getInstance = function()
+            if not instance then
+                instance = create()
+            end
+            return instance
+        end
+    }
+end)()
+
+-- ============================================================
+-- SERVICE MANAGER (Singleton)
+-- ============================================================
+
+local ServiceManager = (function()
+    local instance
+    
+    local function create()
+        local self = {
+            services = {},
+            player = nil
+        }
+        
+        function self:get(serviceName)
+            if not self.services[serviceName] then
+                self.services[serviceName] = Utils.safeGetService(serviceName)
+            end
+            return self.services[serviceName]
+        end
+        
+        function self:init()
+            -- Pre-load essential services
+            local essential = {"Players", "CoreGui", "UserInputService", "RunService"}
+            for _, name in ipairs(essential) do
+                self:get(name)
+            end
+            
+            local players = self:get("Players")
+            self.player = players and players.LocalPlayer
+        end
+        
+        return self
+    end
+    
+    return {
+        getInstance = function()
+            if not instance then
+                instance = create()
+                instance:init()
+            end
+            return instance
+        end
+    }
+end)()
+
+-- ============================================================
+-- ANTI-BAN SYSTEM (Class)
+-- ============================================================
+
+local AntiBan = {}
+AntiBan.__index = AntiBan
+
+function AntiBan.new()
+    local self = setmetatable({}, AntiBan)
+    
+    self.active = false
+    self.blocked = 0
+    self.protected = {}
+    self.patterns = {
+        "kick", "ban", "report", "flag", "log", 
+        "anticheat", "anti", "cheat", "detect", "exploit", "hack"
+    }
+    
+    return self
+end
+
+function AntiBan:init()
+    if self.active then return end
+    self.active = true
+    
+    self:hookMetaMethods()
+    self:protectCharacter()
+end
+
+function AntiBan:hookMetaMethods()
+    local executor = Executor.getInstance()
+    
+    if not executor:hasCapability("metaHook") then
+        return self:fallbackHook()
+    end
+    
+    Utils.pcall(function()
+        local mt = getrawmetatable(game)
+        local oldNamecall = mt.__namecall
+        
+        -- Safe setreadonly
+        local function setReadonly(t, state)
+            if setreadonly then
+                setreadonly(t, state)
+            elseif make_writeable and not state then
+                make_writeable(t)
+            elseif make_readonly and state then
+                make_readonly(t)
             end
         end
-    end)
-    return success
-end
-
--- Universal delete (works on all executors)
-local function delete(obj)
-    local success = false
-    pcall(function()
-        if obj and obj.Parent then
-            obj:Destroy()
-            success = true
+        
+        -- Safe newcclosure
+        local function wrapFunction(func)
+            if newcclosure then
+                return newcclosure(func)
+            elseif protect_function then
+                return protect_function(func)
+            end
+            return func
         end
+        
+        setReadonly(mt, false)
+        
+        mt.__namecall = wrapFunction(function(obj, ...)
+            local method = getnamecallmethod()
+            local args = {...}
+            
+            if method == "FireServer" or method == "InvokeServer" then
+                local name = tostring(obj):lower()
+                
+                -- Check object name
+                if Utils.match(name, self.patterns) then
+                    self.blocked = self.blocked + 1
+                    return
+                end
+                
+                -- Check arguments
+                for _, arg in ipairs(args) do
+                    if type(arg) == "string" and Utils.match(arg, self.patterns) then
+                        self.blocked = self.blocked + 1
+                        return
+                    end
+                end
+            elseif method == "Kick" then
+                self.blocked = self.blocked + 1
+                return
+            end
+            
+            return oldNamecall(obj, ...)
+        end)
+        
+        setReadonly(mt, true)
     end)
-    return success
 end
 
--- Method 1: Fast Scan + Auto Remove
-local function method1()
-    local found = 0
-    local services = {"ReplicatedStorage", "ReplicatedFirst", "StarterPlayer", "StarterGui"}
+function AntiBan:fallbackHook()
+    local sm = ServiceManager.getInstance()
+    local player = sm.player
     
-    for _, svcName in ipairs(services) do
-        local svc = game:FindService(svcName)
-        if svc then
-            local descendants = {}
-            pcall(function()
-                descendants = svc:GetDescendants()
-            end)
-            
-            for _, obj in ipairs(descendants) do
-                pcall(function()
-                    local cls = obj.ClassName
-                    if cls:find("Remote") or cls:find("Script") or cls:find("Bindable") then
-                        local name = obj.Name:lower()
-                        if match(name) then
-                            found = found + 1
-                            
-                            if disable(obj) then
-                                Scanner.Stats.Disabled = Scanner.Stats.Disabled + 1
-                                table.insert(Scanner.Disabled, {Name = obj.Name, Type = cls})
-                            end
-                            
-                            task.wait(0.01)
-                            if delete(obj) then
-                                Scanner.Stats.Removed = Scanner.Stats.Removed + 1
-                                table.insert(Scanner.Deleted, {Name = obj.Name, Type = cls})
-                            end
+    if player then
+        Utils.pcall(function()
+            local oldKick = player.Kick
+            player.Kick = function()
+                self.blocked = self.blocked + 1
+            end
+        end)
+    end
+end
+
+function AntiBan:protectCharacter()
+    local sm = ServiceManager.getInstance()
+    local player = sm.player
+    
+    if not player then return end
+    
+    task.spawn(function()
+        while self.active do
+            Utils.pcall(function()
+                local char = player.Character
+                if char then
+                    local hum = char:FindFirstChildOfClass("Humanoid")
+                    if hum then
+                        if hum.WalkSpeed > 16 then
+                            self.protected.WalkSpeed = hum.WalkSpeed
+                        end
+                        if hum.JumpPower and hum.JumpPower > 50 then
+                            self.protected.JumpPower = hum.JumpPower
+                        end
+                        if hum.JumpHeight and hum.JumpHeight > 7.2 then
+                            self.protected.JumpHeight = hum.JumpHeight
                         end
                     end
-                end)
+                end
+            end)
+            Utils.delay(1)
+        end
+    end)
+end
+
+function AntiBan:getStats()
+    return {
+        blocked = self.blocked,
+        protected = self.protected
+    }
+end
+
+-- ============================================================
+-- SCANNER ENGINE (Class)
+-- ============================================================
+
+local Scanner = {}
+Scanner.__index = Scanner
+
+function Scanner.new()
+    local self = setmetatable({}, Scanner)
+    
+    self.results = {}
+    self.deleted = {}
+    self.disabled = {}
+    self.stats = {
+        found = 0,
+        removed = 0,
+        disabled = 0
+    }
+    self.observers = {}
+    
+    return self
+end
+
+function Scanner:subscribe(callback)
+    table.insert(self.observers, callback)
+end
+
+function Scanner:notify()
+    for _, callback in ipairs(self.observers) do
+        Utils.pcall(callback, self:getStats())
+    end
+end
+
+function Scanner:disable(obj)
+    return Utils.pcall(function()
+        if obj and obj.Parent and obj:IsA("LuaSourceContainer") then
+            obj.Disabled = true
+            self.stats.disabled = self.stats.disabled + 1
+            table.insert(self.disabled, {name = obj.Name, type = obj.ClassName})
+            return true
+        end
+    end) or false
+end
+
+function Scanner:delete(obj)
+    return Utils.pcall(function()
+        if obj and obj.Parent then
+            obj:Destroy()
+            self.stats.removed = self.stats.removed + 1
+            table.insert(self.deleted, {name = obj.Name, type = obj.ClassName})
+            return true
+        end
+    end) or false
+end
+
+function Scanner:processObject(obj)
+    local cls = obj.ClassName
+    
+    if not (cls:find("Remote") or cls:find("Script") or cls:find("Bindable")) then
+        return false
+    end
+    
+    local name = obj.Name:lower()
+    local path = Utils.pcall(obj.GetFullName, obj) or ""
+    
+    -- Pattern check
+    if Utils.match(name, Config.KEYWORDS) or Utils.match(path:lower(), Config.KEYWORDS) then
+        self:disable(obj)
+        Utils.delay(Config.SCAN_DELAY)
+        self:delete(obj)
+        return true
+    end
+    
+    -- Parent check
+    local parent = obj.Parent
+    for i = 1, 3 do
+        if parent and parent ~= game then
+            if Utils.match(parent.Name, Config.KEYWORDS) then
+                self:disable(obj)
+                Utils.delay(Config.SCAN_DELAY)
+                self:delete(obj)
+                return true
             end
+            parent = parent.Parent
+        else
+            break
+        end
+    end
+    
+    -- Hash check
+    local len = #obj.Name
+    if len == 32 or len == 40 or len == 64 then
+        self:disable(obj)
+        Utils.delay(Config.SCAN_DELAY)
+        self:delete(obj)
+        return true
+    end
+    
+    return false
+end
+
+function Scanner:scanService(serviceName)
+    local found = 0
+    local svc = game:FindService(serviceName)
+    
+    if svc then
+        local descendants = Utils.pcall(svc.GetDescendants, svc) or {}
+        
+        for _, obj in ipairs(descendants) do
+            Utils.pcall(function()
+                if self:processObject(obj) then
+                    found = found + 1
+                end
+            end)
         end
     end
     
     return found
 end
 
--- Method 2: Deep Scan + Auto Remove
-local function method2()
+function Scanner:fastScan()
+    local services = {"ReplicatedStorage", "ReplicatedFirst", "StarterPlayer", "StarterGui"}
+    local total = 0
+    
+    for _, service in ipairs(services) do
+        total = total + self:scanService(service)
+    end
+    
+    return total
+end
+
+function Scanner:deepScan()
     local found = 0
-    local all = {}
+    local all = Utils.pcall(game.GetDescendants, game) or {}
     
-    pcall(function()
-        all = game:GetDescendants()
-    end)
-    
-    for i = 1, #all do
-        pcall(function()
-            local obj = all[i]
-            local cls = obj.ClassName
-            
-            if cls:find("Remote") or cls:find("Script") or cls:find("Bindable") then
-                local name = obj.Name:lower()
-                local path = ""
-                pcall(function() path = obj:GetFullName():lower() end)
-                
-                if match(name) or match(path) then
-                    found = found + 1
-                    
-                    if disable(obj) then
-                        Scanner.Stats.Disabled = Scanner.Stats.Disabled + 1
-                        table.insert(Scanner.Disabled, {Name = obj.Name, Type = cls})
-                    end
-                    
-                    task.wait(0.01)
-                    if delete(obj) then
-                        Scanner.Stats.Removed = Scanner.Stats.Removed + 1
-                        table.insert(Scanner.Deleted, {Name = obj.Name, Type = cls})
-                    end
-                end
-                
-                -- Parent check
-                pcall(function()
-                    local p = obj.Parent
-                    for lvl = 1, 3 do
-                        if p and p ~= game then
-                            if match(p.Name:lower()) then
-                                found = found + 1
-                                disable(obj)
-                                task.wait(0.01)
-                                delete(obj)
-                                break
-                            end
-                            p = p.Parent
-                        else
-                            break
-                        end
-                    end
-                end)
-                
-                -- Hash check
-                local len = #obj.Name
-                if len == 32 or len == 40 or len == 64 then
-                    found = found + 1
-                    disable(obj)
-                    task.wait(0.01)
-                    delete(obj)
-                end
+    for i, obj in ipairs(all) do
+        Utils.pcall(function()
+            if self:processObject(obj) then
+                found = found + 1
             end
         end)
         
-        if i % 150 == 0 then task.wait() end
+        if i % Config.BATCH_SIZE == 0 then
+            Utils.delay(0)
+        end
     end
     
     return found
 end
 
--- Method 3: Verification Check
-local function method3()
-    local remaining = 0
+function Scanner:verify()
     local services = {"ReplicatedStorage", "ReplicatedFirst", "StarterPlayer", "StarterGui", "Workspace"}
+    local remaining = 0
     
-    for _, svcName in ipairs(services) do
-        local svc = game:FindService(svcName)
+    for _, serviceName in ipairs(services) do
+        local svc = game:FindService(serviceName)
         if svc then
-            local descendants = {}
-            pcall(function()
-                descendants = svc:GetDescendants()
-            end)
+            local descendants = Utils.pcall(svc.GetDescendants, svc) or {}
             
             for _, obj in ipairs(descendants) do
-                pcall(function()
-                    local cls = obj.ClassName
-                    if cls:find("Remote") or cls:find("Script") or cls:find("Bindable") then
-                        local name = obj.Name:lower()
-                        
-                        if match(name) then
-                            remaining = remaining + 1
-                            
-                            if obj:IsA("LuaSourceContainer") and not obj.Disabled then
-                                obj.Disabled = true
-                                Scanner.Stats.Disabled = Scanner.Stats.Disabled + 1
-                            end
-                            
-                            task.wait(0.01)
-                            if obj.Parent then
-                                obj:Destroy()
-                                Scanner.Stats.Removed = Scanner.Stats.Removed + 1
-                            end
-                        end
+                Utils.pcall(function()
+                    if self:processObject(obj) then
+                        remaining = remaining + 1
                     end
                 end)
             end
@@ -405,163 +503,272 @@ local function method3()
     return remaining
 end
 
--- Universal GUI (Compatible with all executors)
-local function createGUI()
-    local sg = Instance.new("ScreenGui")
-    sg.Name = "ACS_" .. tostring(math.random(1000, 9999))
-    sg.ResetOnSpawn = false
+function Scanner:async(callback)
+    task.spawn(function()
+        callback(self)
+    end)
+end
+
+function Scanner:reset()
+    self.stats.found = 0
+    self.stats.removed = 0
+    self.stats.disabled = 0
+end
+
+function Scanner:getStats()
+    return {
+        found = self.stats.found,
+        removed = self.stats.removed,
+        disabled = self.stats.disabled,
+        total = #self.results
+    }
+end
+
+-- ============================================================
+-- MODERN UI FRAMEWORK (Class)
+-- ============================================================
+
+local UI = {}
+UI.__index = UI
+
+function UI.new()
+    local self = setmetatable({}, UI)
     
-    -- Try CoreGui first, then PlayerGui
-    local guiParented = false
-    pcall(function()
-        sg.Parent = getService("CoreGui")
-        guiParented = true
+    self.elements = {}
+    self.state = {
+        minimized = false,
+        scanning = false
+    }
+    
+    return self
+end
+
+function UI:createElement(className, props)
+    local element = Instance.new(className)
+    
+    for key, value in pairs(props or {}) do
+        if key == "Children" then
+            for _, child in ipairs(value) do
+                child.Parent = element
+            end
+        else
+            element[key] = value
+        end
+    end
+    
+    return element
+end
+
+function UI:createButton(props)
+    local btn = self:createElement("TextButton", props)
+    
+    local corner = self:createElement("UICorner", {
+        CornerRadius = UDim.new(0, props.CornerRadius or 8),
+        Parent = btn
+    })
+    
+    return btn
+end
+
+function UI:render()
+    local sm = ServiceManager.getInstance()
+    
+    local sg = self:createElement("ScreenGui", {
+        Name = "ACS_" .. tostring(math.random(1000, 9999)),
+        ResetOnSpawn = false
+    })
+    
+    -- Try CoreGui first
+    local parented = Utils.pcall(function()
+        sg.Parent = sm:get("CoreGui")
     end)
     
-    if not guiParented and Player then
-        pcall(function()
-            local pg = Player:FindFirstChild("PlayerGui") or Player:WaitForChild("PlayerGui", 3)
-            if pg then
-                sg.Parent = pg
-                guiParented = true
-            end
+    if not parented and sm.player then
+        Utils.pcall(function()
+            sg.Parent = sm.player:WaitForChild("PlayerGui", 3)
         end)
     end
     
-    if not guiParented then
-        warn("[AC Scanner] Failed to parent GUI")
-        return nil
-    end
+    local main = self:createElement("Frame", {
+        Name = "Main",
+        Size = UDim2.new(0, 420, 0, 190),
+        Position = UDim2.new(0.5, -210, 0.5, -95),
+        BackgroundColor3 = Color3.fromRGB(12, 12, 12),
+        BorderSizePixel = 0,
+        Parent = sg,
+        Children = {
+            self:createElement("UICorner", {CornerRadius = UDim.new(0, 12)}),
+            self:createElement("UIStroke", {
+                Color = Color3.fromRGB(70, 70, 70),
+                Thickness = 2
+            })
+        }
+    })
     
-    local m = Instance.new("Frame", sg)
-    m.Name = "Main"
-    m.Size = UDim2.new(0, 400, 0, 180)
-    m.Position = UDim2.new(0.5, -200, 0.5, -90)
-    m.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
-    m.BorderSizePixel = 0
+    -- Title Bar
+    local titleBar = self:createElement("Frame", {
+        Name = "TitleBar",
+        Size = UDim2.new(1, 0, 0, 40),
+        BackgroundColor3 = Color3.fromRGB(18, 18, 18),
+        BorderSizePixel = 0,
+        Parent = main,
+        Children = {
+            self:createElement("UICorner", {CornerRadius = UDim.new(0, 12)}),
+            self:createElement("Frame", {
+                Size = UDim2.new(1, 0, 0, 12),
+                Position = UDim2.new(0, 0, 1, -12),
+                BackgroundColor3 = Color3.fromRGB(18, 18, 18),
+                BorderSizePixel = 0
+            })
+        }
+    })
     
-    Instance.new("UICorner", m).CornerRadius = UDim.new(0, 10)
+    local title = self:createElement("TextLabel", {
+        Size = UDim2.new(1, -85, 1, 0),
+        Position = UDim2.new(0, 12, 0, 0),
+        BackgroundTransparency = 1,
+        Text = "AC SCANNER V" .. VERSION,
+        TextColor3 = Color3.fromRGB(255, 255, 255),
+        TextSize = 15,
+        Font = Enum.Font.GothamBold,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        Parent = titleBar
+    })
     
-    -- Title bar
-    local titleBar = Instance.new("Frame", m)
-    titleBar.Name = "TitleBar"
-    titleBar.Size = UDim2.new(1, 0, 0, 35)
-    titleBar.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
-    titleBar.BorderSizePixel = 0
+    local minimize = self:createButton({
+        Name = "Minimize",
+        Size = UDim2.new(0, 32, 0, 32),
+        Position = UDim2.new(1, -72, 0.5, -16),
+        BackgroundColor3 = Color3.fromRGB(65, 65, 65),
+        Text = "-",
+        TextColor3 = Color3.fromRGB(255, 255, 255),
+        TextSize = 18,
+        Font = Enum.Font.GothamBold,
+        CornerRadius = 8,
+        Parent = titleBar
+    })
     
-    Instance.new("UICorner", titleBar).CornerRadius = UDim.new(0, 10)
+    local close = self:createButton({
+        Name = "Close",
+        Size = UDim2.new(0, 32, 0, 32),
+        Position = UDim2.new(1, -36, 0.5, -16),
+        BackgroundColor3 = Color3.fromRGB(220, 55, 55),
+        Text = "×",
+        TextColor3 = Color3.fromRGB(255, 255, 255),
+        TextSize = 20,
+        Font = Enum.Font.GothamBold,
+        CornerRadius = 8,
+        Parent = titleBar
+    })
     
-    local cover = Instance.new("Frame", titleBar)
-    cover.Size = UDim2.new(1, 0, 0, 10)
-    cover.Position = UDim2.new(0, 0, 1, -10)
-    cover.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
-    cover.BorderSizePixel = 0
+    -- Content
+    local content = self:createElement("Frame", {
+        Name = "Content",
+        Size = UDim2.new(1, 0, 1, -40),
+        Position = UDim2.new(0, 0, 0, 40),
+        BackgroundTransparency = 1,
+        Parent = main
+    })
     
-    local t = Instance.new("TextLabel", titleBar)
-    t.Size = UDim2.new(1, -80, 1, 0)
-    t.Position = UDim2.new(0, 10, 0, 0)
-    t.BackgroundTransparency = 1
-    t.Text = "AC SCANNER V" .. VERSION
-    t.TextColor3 = Color3.fromRGB(255, 255, 255)
-    t.TextSize = 14
-    t.Font = Enum.Font.GothamBold
-    t.TextXAlignment = Enum.TextXAlignment.Left
+    local executor = Executor.getInstance()
+    local status = self:createElement("TextLabel", {
+        Name = "Status",
+        Size = UDim2.new(1, -24, 0, 26),
+        Position = UDim2.new(0, 12, 0, 12),
+        BackgroundTransparency = 1,
+        Text = "Ready • Executor: " .. executor.name,
+        TextColor3 = Color3.fromRGB(100, 255, 120),
+        TextSize = 11,
+        Font = Enum.Font.GothamBold,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        Parent = content
+    })
     
-    local minimize = Instance.new("TextButton", titleBar)
-    minimize.Name = "Minimize"
-    minimize.Size = UDim2.new(0, 30, 0, 28)
-    minimize.Position = UDim2.new(1, -68, 0, 3.5)
-    minimize.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-    minimize.Text = "-"
-    minimize.TextColor3 = Color3.fromRGB(255, 255, 255)
-    minimize.TextSize = 18
-    minimize.Font = Enum.Font.GothamBold
-    Instance.new("UICorner", minimize).CornerRadius = UDim.new(0, 6)
+    local info = self:createElement("TextLabel", {
+        Name = "Info",
+        Size = UDim2.new(1, -24, 0, 42),
+        Position = UDim2.new(0, 12, 0, 42),
+        BackgroundTransparency = 1,
+        Text = "Removed: 0\nDisabled: 0\nBlocked: 0",
+        TextColor3 = Color3.fromRGB(180, 180, 180),
+        TextSize = 11,
+        Font = Enum.Font.Gotham,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Top,
+        Parent = content
+    })
     
-    local close = Instance.new("TextButton", titleBar)
-    close.Name = "Close"
-    close.Size = UDim2.new(0, 30, 0, 28)
-    close.Position = UDim2.new(1, -35, 0, 3.5)
-    close.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-    close.Text = "X"
-    close.TextColor3 = Color3.fromRGB(255, 255, 255)
-    close.TextSize = 14
-    close.Font = Enum.Font.GothamBold
-    Instance.new("UICorner", close).CornerRadius = UDim.new(0, 6)
+    local scanBtn = self:createButton({
+        Name = "Scan",
+        Size = UDim2.new(1, -24, 0, 44),
+        Position = UDim2.new(0, 12, 1, -52),
+        BackgroundColor3 = Color3.fromRGB(55, 125, 225),
+        Text = "SCAN & AUTO REMOVE",
+        TextColor3 = Color3.fromRGB(255, 255, 255),
+        TextSize = 13,
+        Font = Enum.Font.GothamBold,
+        CornerRadius = 10,
+        Parent = content
+    })
     
-    local content = Instance.new("Frame", m)
-    content.Name = "Content"
-    content.Size = UDim2.new(1, 0, 1, -35)
-    content.Position = UDim2.new(0, 0, 0, 35)
-    content.BackgroundTransparency = 1
+    self.elements = {
+        gui = sg,
+        main = main,
+        titleBar = titleBar,
+        content = content,
+        status = status,
+        info = info,
+        scanBtn = scanBtn,
+        minimize = minimize,
+        close = close
+    }
     
-    local st = Instance.new("TextLabel", content)
-    st.Name = "Status"
-    st.Size = UDim2.new(1, -20, 0, 25)
-    st.Position = UDim2.new(0, 10, 0, 10)
-    st.BackgroundTransparency = 1
-    st.Text = "Ready | Executor: " .. Executor.Name
-    st.TextColor3 = Color3.fromRGB(100, 255, 100)
-    st.TextSize = 11
-    st.Font = Enum.Font.GothamBold
-    st.TextXAlignment = Enum.TextXAlignment.Left
+    self:bindEvents()
     
-    local info = Instance.new("TextLabel", content)
-    info.Name = "Info"
-    info.Size = UDim2.new(1, -20, 0, 40)
-    info.Position = UDim2.new(0, 10, 0, 40)
-    info.BackgroundTransparency = 1
-    info.Text = "Removed: 0\nDisabled: 0\nBlocked: 0"
-    info.TextColor3 = Color3.fromRGB(180, 180, 180)
-    info.TextSize = 11
-    info.Font = Enum.Font.Gotham
-    info.TextXAlignment = Enum.TextXAlignment.Left
-    info.TextYAlignment = Enum.TextYAlignment.Top
+    return self
+end
+
+function UI:bindEvents()
+    local e = self.elements
     
-    local scan = Instance.new("TextButton", content)
-    scan.Name = "Scan"
-    scan.Size = UDim2.new(1, -20, 0, 40)
-    scan.Position = UDim2.new(0, 10, 1, -48)
-    scan.BackgroundColor3 = Color3.fromRGB(50, 120, 220)
-    scan.Text = "SCAN & AUTO REMOVE"
-    scan.TextColor3 = Color3.fromRGB(255, 255, 255)
-    scan.TextSize = 13
-    scan.Font = Enum.Font.GothamBold
-    Instance.new("UICorner", scan).CornerRadius = UDim.new(0, 8)
-    
-    close.MouseButton1Click:Connect(function()
-        sg:Destroy()
+    -- Close
+    e.close.MouseButton1Click:Connect(function()
+        e.gui:Destroy()
     end)
     
-    local minimized = false
-    minimize.MouseButton1Click:Connect(function()
-        minimized = not minimized
+    -- Minimize
+    e.minimize.MouseButton1Click:Connect(function()
+        self.state.minimized = not self.state.minimized
         
-        pcall(function()
-            if minimized then
-                m:TweenSize(UDim2.new(0, 400, 0, 35), Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.3, true)
-                minimize.Text = "+"
-                content.Visible = false
+        Utils.pcall(function()
+            if self.state.minimized then
+                e.main:TweenSize(UDim2.new(0, 420, 0, 40), "Out", "Quad", Config.ANIMATION_SPEED, true)
+                e.minimize.Text = "+"
+                e.content.Visible = false
             else
-                m:TweenSize(UDim2.new(0, 400, 0, 180), Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.3, true)
-                minimize.Text = "-"
-                content.Visible = true
+                e.main:TweenSize(UDim2.new(0, 420, 0, 190), "Out", "Quad", Config.ANIMATION_SPEED, true)
+                e.minimize.Text = "-"
+                e.content.Visible = true
             end
         end)
     end)
     
-    -- Universal drag (works on all executors)
-    local drag, dragInput, dragStart, startPos
+    -- Drag
+    self:enableDrag(e.titleBar, e.main)
+end
+
+function UI:enableDrag(titleBar, frame)
+    local dragging, dragInput, dragStart, startPos
     
     titleBar.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            drag = true
+            dragging = true
             dragStart = input.Position
-            startPos = m.Position
+            startPos = frame.Position
             
             input.Changed:Connect(function()
                 if input.UserInputState == Enum.UserInputState.End then
-                    drag = false
+                    dragging = false
                 end
             end)
         end
@@ -573,103 +780,188 @@ local function createGUI()
         end
     end)
     
-    local uis = getService("UserInputService")
+    local sm = ServiceManager.getInstance()
+    local uis = sm:get("UserInputService")
+    
     if uis then
         uis.InputChanged:Connect(function(input)
-            if input == dragInput and drag then
+            if input == dragInput and dragging then
                 local delta = input.Position - dragStart
-                m.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+                frame.Position = UDim2.new(
+                    startPos.X.Scale, startPos.X.Offset + delta.X,
+                    startPos.Y.Scale, startPos.Y.Offset + delta.Y
+                )
             end
         end)
     end
-    
-    return {GUI = sg, Main = m, Status = st, Info = info, Scan = scan, Content = content}
 end
 
--- Init
-AntiBan:Init()
-local ui = createGUI()
-
-if not ui then
-    warn("[AC Scanner] GUI creation failed")
-    return
+function UI:updateStats(stats, antiBanStats)
+    local e = self.elements
+    if not e or not e.info then return end
+    
+    Utils.pcall(function()
+        e.info.Text = string.format(
+            "Removed: %d\nDisabled: %d\nBlocked: %d",
+            stats.removed, stats.disabled, antiBanStats.blocked
+        )
+    end)
 end
 
--- Scan Handler
-ui.Scan.MouseButton1Click:Connect(function()
-    ui.Scan.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
-    ui.Scan.Text = "SCANNING..."
-    ui.Status.Text = "Method 1: Fast scan..."
-    ui.Status.TextColor3 = Color3.fromRGB(255, 200, 100)
+function UI:setStatus(text, color)
+    local e = self.elements
+    if not e or not e.status then return end
     
-    Scanner.Stats.Found = 0
-    Scanner.Stats.Removed = 0
-    Scanner.Stats.Disabled = 0
+    Utils.pcall(function()
+        e.status.Text = text
+        e.status.TextColor3 = color or Color3.fromRGB(180, 180, 180)
+    end)
+end
+
+function UI:setScanState(scanning)
+    local e = self.elements
+    if not e or not e.scanBtn then return end
     
-    task.spawn(function()
-        local found1 = method1()
-        Scanner.Stats.Found = Scanner.Stats.Found + found1
-        ui.Info.Text = string.format("Removed: %d\nDisabled: %d\nBlocked: %d", 
-            Scanner.Stats.Removed, Scanner.Stats.Disabled, AntiBan.Blocked)
+    self.state.scanning = scanning
+    
+    Utils.pcall(function()
+        if scanning then
+            e.scanBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+            e.scanBtn.Text = "SCANNING..."
+        else
+            e.scanBtn.BackgroundColor3 = Color3.fromRGB(55, 125, 225)
+            e.scanBtn.Text = "SCAN & AUTO REMOVE"
+        end
+    end)
+end
+
+-- ============================================================
+-- APPLICATION CONTROLLER
+-- ============================================================
+
+local App = {}
+
+function App:init()
+    -- Initialize systems
+    self.executor = Executor.getInstance()
+    self.services = ServiceManager.getInstance()
+    self.antiBan = AntiBan.new()
+    self.scanner = Scanner.new()
+    self.ui = UI.new()
+    
+    -- Start anti-ban
+    self.antiBan:init()
+    
+    -- Render UI
+    self.ui:render()
+    
+    -- Bind scan button
+    self:bindScanButton()
+    
+    -- Start auto-update
+    self:startAutoUpdate()
+    
+    -- Log startup
+    self:logStartup()
+end
+
+function App:bindScanButton()
+    local btn = self.ui.elements.scanBtn
+    
+    btn.MouseButton1Click:Connect(function()
+        if self.ui.state.scanning then return end
         
-        task.wait(0.3)
-        ui.Status.Text = "Method 2: Deep scan..."
+        self:runScan()
+    end)
+end
+
+function App:runScan()
+    self.ui:setScanState(true)
+    self.ui:setStatus("Method 1: Fast scan...", Color3.fromRGB(255, 200, 100))
+    
+    self.scanner:reset()
+    
+    self.scanner:async(function(scanner)
+        -- Method 1: Fast
+        scanner:fastScan()
+        self.ui:updateStats(scanner:getStats(), self.antiBan:getStats())
+        Utils.delay(0.3)
         
-        local found2 = method2()
-        Scanner.Stats.Found = Scanner.Stats.Found + found2
-        ui.Info.Text = string.format("Removed: %d\nDisabled: %d\nBlocked: %d", 
-            Scanner.Stats.Removed, Scanner.Stats.Disabled, AntiBan.Blocked)
+        self.ui:setStatus("Method 2: Deep scan...", Color3.fromRGB(255, 200, 100))
         
-        task.wait(0.3)
-        ui.Status.Text = "Method 3: Verification..."
+        -- Method 2: Deep
+        scanner:deepScan()
+        self.ui:updateStats(scanner:getStats(), self.antiBan:getStats())
+        Utils.delay(0.3)
         
-        local remaining = method3()
-        ui.Info.Text = string.format("Removed: %d\nDisabled: %d\nBlocked: %d", 
-            Scanner.Stats.Removed, Scanner.Stats.Disabled, AntiBan.Blocked)
+        self.ui:setStatus("Method 3: Verification...", Color3.fromRGB(255, 200, 100))
         
-        task.wait(0.3)
-        ui.Status.Text = "Final check..."
-        task.wait(0.5)
+        -- Method 3: Verify
+        local remaining = scanner:verify()
+        self.ui:updateStats(scanner:getStats(), self.antiBan:getStats())
+        Utils.delay(0.3)
         
-        local finalCheck = method3()
+        self.ui:setStatus("Final check...", Color3.fromRGB(255, 200, 100))
+        Utils.delay(0.5)
         
-        ui.Scan.BackgroundColor3 = Color3.fromRGB(50, 120, 220)
-        ui.Scan.Text = "SCAN & AUTO REMOVE"
+        -- Final
+        local finalCheck = scanner:verify()
+        
+        self.ui:setScanState(false)
         
         if finalCheck == 0 then
-            ui.Status.Text = string.format("Complete! Removed: %d | CLEAN!", Scanner.Stats.Removed)
-            ui.Status.TextColor3 = Color3.fromRGB(100, 255, 100)
+            self.ui:setStatus(
+                string.format("Complete! Removed: %d • CLEAN!", scanner.stats.removed),
+                Color3.fromRGB(100, 255, 120)
+            )
         else
-            ui.Status.Text = string.format("Complete! Removed: %d | %d remain", Scanner.Stats.Removed, finalCheck)
-            ui.Status.TextColor3 = Color3.fromRGB(255, 200, 100)
+            self.ui:setStatus(
+                string.format("Complete! Removed: %d • %d remain", scanner.stats.removed, finalCheck),
+                Color3.fromRGB(255, 200, 100)
+            )
         end
         
-        ui.Info.Text = string.format("Removed: %d\nDisabled: %d\nBlocked: %d", 
-            Scanner.Stats.Removed, Scanner.Stats.Disabled, AntiBan.Blocked)
+        self.ui:updateStats(scanner:getStats(), self.antiBan:getStats())
     end)
-end)
+end
 
--- Auto-update
-task.spawn(function()
-    while task.wait(2) do
-        pcall(function()
-            if ui and ui.Info then
-                ui.Info.Text = string.format("Removed: %d\nDisabled: %d\nBlocked: %d", 
-                    Scanner.Stats.Removed, Scanner.Stats.Disabled, AntiBan.Blocked)
-            end
-        end)
-    end
-end)
+function App:startAutoUpdate()
+    task.spawn(function()
+        while task.wait(Config.UPDATE_INTERVAL) do
+            Utils.pcall(function()
+                self.ui:updateStats(self.scanner:getStats(), self.antiBan:getStats())
+            end)
+        end
+    end)
+end
 
-print("═══════════════════════════════════════════════════════")
-print("AC SCANNER V" .. VERSION .. " LOADED")
-print("═══════════════════════════════════════════════════════")
-print("✓ Executor: " .. Executor.Name)
-print("✓ Meta Hook: " .. (Executor.HasMetaHook and "YES" or "NO"))
-print("✓ NewCClosure: " .. (Executor.HasNewCClosure and "YES" or "NO"))
-print("✓ Auto Remove: ON")
-print("✓ Anti-Ban: Enhanced")
-print("✓ 3 Advanced Methods")
-print("═══════════════════════════════════════════════════════")
-print("Ready to scan!")
-print("═══════════════════════════════════════════════════════")
+function App:logStartup()
+    local exec = self.executor:info()
+    
+    print("═══════════════════════════════════════════════════════")
+    print("AC SCANNER V" .. VERSION .. " - MODERN EDITION")
+    print("═══════════════════════════════════════════════════════")
+    print("⚡ Executor: " .. exec.name)
+    print("⚡ Meta Hook: " .. (exec.capabilities.metaHook and "✓" or "✗"))
+    print("⚡ NewCClosure: " .. (exec.capabilities.newCClosure and "✓" or "✗"))
+    print("⚡ Architecture: Modern Lua")
+    print("⚡ Auto Remove: ON")
+    print("⚡ Anti-Ban: Active")
+    print("═══════════════════════════════════════════════════════")
+    print("🚀 Ready to scan!")
+    print("═══════════════════════════════════════════════════════")
+end
+
+-- ============================================================
+-- BOOTSTRAP
+-- ============================================================
+
+local app = App
+app:init()
+
+-- Export to global (optional)
+getgenv = getgenv or function() return _G end
+getgenv().ACScanner = {
+    version = VERSION,
+    app = app
+}

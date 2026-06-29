@@ -76,7 +76,7 @@ local function setPartVelocity(part, velocity)
         part.Velocity = velocity
     end)
 
-    return ok == true
+    return ok
 end
 
 local function getPartVelocity(part)

@@ -4,13 +4,37 @@
 
 -- ===== KIỂM TRA MÔI TRƯỜNG =====
 -- Một số executor dùng game, một số dùng shared, một số dùng getrenv()
-local env = (type(getrenv) == "function" and getrenv()) or (type(getfenv) == "function" and getfenv()) or _G
-local gameService = env.game or _G.game or game
+local function callIfAvailable(fn)
+    if type(fn) ~= "function" then
+        return nil
+    end
+
+    local ok, result = pcall(fn)
+    if ok then
+        return result
+    end
+
+    return nil
+end
+
+local env = callIfAvailable(getrenv) or callIfAvailable(getfenv) or _G
+local gameService = env.game or rawget(_G, "game") or game
 assert(gameService, "Không tìm thấy biến game trong môi trường hiện tại")
+
+local function cloneReference(instance)
+    if type(cloneref) == "function" then
+        local ok, cloned = pcall(cloneref, instance)
+        if ok and cloned then
+            return cloned
+        end
+    end
+
+    return instance
+end
 
 local function safeGetService(serviceName)
     local ok, service = pcall(function()
-        return gameService:GetService(serviceName)
+        return cloneReference(gameService:GetService(serviceName))
     end)
 
     if ok then
@@ -31,6 +55,10 @@ local antiFlingEnabled = false
 local connections = {}
 
 local function trackConnection(connection)
+    if not connection then
+        return nil
+    end
+
     table.insert(connections, connection)
     return connection
 end
@@ -49,16 +77,69 @@ local function setPartVelocity(part, velocity)
     end)
 end
 
+local function getPartVelocity(part)
+    local ok, velocity = pcall(function()
+        return part.AssemblyLinearVelocity
+    end)
+
+    if ok and velocity then
+        return velocity
+    end
+
+    ok, velocity = pcall(function()
+        return part.Velocity
+    end)
+
+    if ok and velocity then
+        return velocity
+    end
+
+    return Vector3.new(0, 0, 0)
+end
+
+local function setPartAngularVelocity(part, velocity)
+    local ok = pcall(function()
+        part.AssemblyAngularVelocity = velocity
+    end)
+
+    if ok then
+        return true
+    end
+
+    return pcall(function()
+        part.RotVelocity = velocity
+    end)
+end
+
+local function getRootPart(char)
+    if not char then
+        return nil
+    end
+
+    return char:FindFirstChild("HumanoidRootPart")
+        or char:FindFirstChild("UpperTorso")
+        or char.PrimaryPart
+        or char:FindFirstChildWhichIsA("BasePart")
+end
+
+local function getHumanoid(char)
+    if not char then
+        return nil
+    end
+
+    return char:FindFirstChildOfClass("Humanoid") or char:FindFirstChild("Humanoid")
+end
+
 -- ===== CẬP NHẬT NHÂN VẬT (hỗ trợ respawn) =====
 local character = player.Character
-local rootPart = character and character:FindFirstChild("HumanoidRootPart")
-local humanoid = character and character:FindFirstChild("Humanoid")
+local rootPart = getRootPart(character)
+local humanoid = getHumanoid(character)
 
 local function updateCharacter()
     character = player.Character
     if character then
-        rootPart = character:FindFirstChild("HumanoidRootPart")
-        humanoid = character:FindFirstChild("Humanoid")
+        rootPart = getRootPart(character)
+        humanoid = getHumanoid(character)
     else
         rootPart = nil
         humanoid = nil
@@ -70,8 +151,8 @@ trackConnection(player.CharacterAdded:Connect(function(newCharacter)
     rootPart = nil
     humanoid = nil
 
-    rootPart = newCharacter:WaitForChild("HumanoidRootPart", 5)
-    humanoid = newCharacter:WaitForChild("Humanoid", 5)
+    rootPart = newCharacter:WaitForChild("HumanoidRootPart", 5) or getRootPart(newCharacter)
+    humanoid = newCharacter:WaitForChild("Humanoid", 5) or getHumanoid(newCharacter)
 end))
 updateCharacter()
 
@@ -81,25 +162,37 @@ updateCharacter()
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "FlingControlGUI"
 screenGui.ResetOnSpawn = false
+screenGui.IgnoreGuiInset = true
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 
 -- Một số executor yêu cầu Parent khác nhau
-local oldGui = (player:FindFirstChild("PlayerGui") and player.PlayerGui:FindFirstChild(screenGui.Name))
+local function getGuiParent()
+    local hiddenGui = callIfAvailable(gethui)
+    if hiddenGui then
+        return hiddenGui
+    end
+
+    local playerGui = player:FindFirstChild("PlayerGui") or player:WaitForChild("PlayerGui", 5)
+    if playerGui then
+        return playerGui
+    end
+
+    return safeGetService("CoreGui") or safeGetService("StarterGui")
+end
+
+local guiParent = getGuiParent()
+local oldGui = guiParent and guiParent:FindFirstChild(screenGui.Name)
 if oldGui then
     oldGui:Destroy()
 end
 
-local playerGui = player:FindFirstChild("PlayerGui") or player:WaitForChild("PlayerGui", 5)
-if playerGui then
-    screenGui.Parent = playerGui
-else
-    -- Fallback: gắn vào CoreGui nếu không có PlayerGui
-    local coreGui = safeGetService("CoreGui")
-    if coreGui then
-        screenGui.Parent = coreGui
-    else
-        screenGui.Parent = safeGetService("StarterGui")
-    end
+if type(syn) == "table" and type(syn.protect_gui) == "function" then
+    pcall(syn.protect_gui, screenGui)
+elseif type(protectgui) == "function" then
+    pcall(protectgui, screenGui)
 end
+
+screenGui.Parent = guiParent
 
 -- === Khung chính ===
 local frame = Instance.new("Frame")
@@ -109,8 +202,42 @@ frame.BackgroundColor3 = Color3.fromRGB(20, 20, 35)
 frame.BackgroundTransparency = 0.1
 frame.BorderSizePixel = 0
 frame.Active = true
-frame.Draggable = true
+frame.Draggable = false
 frame.Parent = screenGui
+
+local dragging = false
+local dragStart = nil
+local startPosition = nil
+
+local function updateDrag(input)
+    local delta = input.Position - dragStart
+    frame.Position = UDim2.new(
+        startPosition.X.Scale,
+        startPosition.X.Offset + delta.X,
+        startPosition.Y.Scale,
+        startPosition.Y.Offset + delta.Y
+    )
+end
+
+trackConnection(frame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPosition = frame.Position
+
+        trackConnection(input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end))
+    end
+end))
+
+trackConnection(UserInputService.InputChanged:Connect(function(input)
+    if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        updateDrag(input)
+    end
+end))
 
 local corner = Instance.new("UICorner")
 corner.CornerRadius = UDim.new(0, 12)
@@ -209,7 +336,7 @@ local function doFling()
         if otherPlayer ~= player then
             local otherChar = otherPlayer.Character
             if otherChar then
-                local otherRoot = otherChar:FindFirstChild("HumanoidRootPart")
+                local otherRoot = getRootPart(otherChar)
                 if otherRoot then
                     -- Dùng helper an toàn để tránh lỗi crash executor
                     if setPartVelocity(otherRoot, direction) then
@@ -277,13 +404,11 @@ trackConnection(RunService.Heartbeat:Connect(function()
     end
     if humanoid.Health <= 0 then return end
 
-    local vel = rootPart.AssemblyLinearVelocity or rootPart.Velocity
+    local vel = getPartVelocity(rootPart)
     -- Ngưỡng 80: cho phép di chuyển bình thường
     if vel.Magnitude > 80 then
         setPartVelocity(rootPart, Vector3.new(0, 0, 0))
-        pcall(function()
-            rootPart.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
-        end)
+        setPartAngularVelocity(rootPart, Vector3.new(0, 0, 0))
     end
 end))
 
@@ -311,9 +436,19 @@ local function cleanup(destroyGui)
     end
 end
 
-screenGui.Destroying:Connect(function()
-    cleanup(false)
+local destroySignalConnected = pcall(function()
+    screenGui.Destroying:Connect(function()
+        cleanup(false)
+    end)
 end)
+
+if not destroySignalConnected then
+    trackConnection(screenGui.AncestryChanged:Connect(function(_, parent)
+        if parent == nil then
+            cleanup(false)
+        end
+    end))
+end
 
 -- ================================================================
 --               THÔNG BÁO KHỞI TẠO

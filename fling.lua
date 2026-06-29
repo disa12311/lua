@@ -72,9 +72,11 @@ local function setPartVelocity(part, velocity)
         return true
     end
 
-    return pcall(function()
+    ok = pcall(function()
         part.Velocity = velocity
     end)
+
+    return ok == true
 end
 
 local function getPartVelocity(part)
@@ -402,11 +404,31 @@ trackConnection(RunService.Heartbeat:Connect(function()
         updateCharacter()
         return
     end
-    if humanoid.Health <= 0 then return end
+
+    local rootOk, rootParent = pcall(function()
+        return rootPart.Parent
+    end)
+    if not rootOk or not rootParent then
+        updateCharacter()
+        return
+    end
+
+    local healthOk, health = pcall(function()
+        return humanoid.Health
+    end)
+    if not healthOk or health <= 0 then
+        updateCharacter()
+        return
+    end
 
     local vel = getPartVelocity(rootPart)
+    local magnitudeOk, magnitude = pcall(function()
+        return vel.Magnitude
+    end)
+    if not magnitudeOk then return end
+
     -- Ngưỡng 80: cho phép di chuyển bình thường
-    if vel.Magnitude > 80 then
+    if magnitude > 80 then
         setPartVelocity(rootPart, Vector3.new(0, 0, 0))
         setPartAngularVelocity(rootPart, Vector3.new(0, 0, 0))
     end

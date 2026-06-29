@@ -4,17 +4,50 @@
 
 -- ===== KIỂM TRA MÔI TRƯỜNG =====
 -- Một số executor dùng game, một số dùng shared, một số dùng getrenv()
-local env = getrenv and getrenv() or getfenv and getfenv() or _G
-local game = env.game or game
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
-local player = Players.LocalPlayer
+local env = (type(getrenv) == "function" and getrenv()) or (type(getfenv) == "function" and getfenv()) or _G
+local gameService = env.game or _G.game or game
+assert(gameService, "Không tìm thấy biến game trong môi trường hiện tại")
+
+local function safeGetService(serviceName)
+    local ok, service = pcall(function()
+        return gameService:GetService(serviceName)
+    end)
+
+    if ok then
+        return service
+    end
+
+    return nil
+end
+
+local Players = assert(safeGetService("Players"), "Không tìm thấy Players service")
+local RunService = assert(safeGetService("RunService"), "Không tìm thấy RunService service")
+local UserInputService = assert(safeGetService("UserInputService"), "Không tìm thấy UserInputService service")
+local player = Players.LocalPlayer or Players.PlayerAdded:Wait()
 
 -- ===== BIẾN TRẠNG THÁI =====
 local flingEnabled = false
 local antiFlingEnabled = false
-local isRunning = true
+local connections = {}
+
+local function trackConnection(connection)
+    table.insert(connections, connection)
+    return connection
+end
+
+local function setPartVelocity(part, velocity)
+    local ok = pcall(function()
+        part.AssemblyLinearVelocity = velocity
+    end)
+
+    if ok then
+        return true
+    end
+
+    return pcall(function()
+        part.Velocity = velocity
+    end)
+end
 
 -- ===== CẬP NHẬT NHÂN VẬT (hỗ trợ respawn) =====
 local character = player.Character
@@ -32,7 +65,14 @@ local function updateCharacter()
     end
 end
 
-player.CharacterAdded:Connect(updateCharacter)
+trackConnection(player.CharacterAdded:Connect(function(newCharacter)
+    character = newCharacter
+    rootPart = nil
+    humanoid = nil
+
+    rootPart = newCharacter:WaitForChild("HumanoidRootPart", 5)
+    humanoid = newCharacter:WaitForChild("Humanoid", 5)
+end))
 updateCharacter()
 
 -- ================================================================
@@ -43,16 +83,21 @@ screenGui.Name = "FlingControlGUI"
 screenGui.ResetOnSpawn = false
 
 -- Một số executor yêu cầu Parent khác nhau
-local playerGui = player:FindFirstChild("PlayerGui")
+local oldGui = (player:FindFirstChild("PlayerGui") and player.PlayerGui:FindFirstChild(screenGui.Name))
+if oldGui then
+    oldGui:Destroy()
+end
+
+local playerGui = player:FindFirstChild("PlayerGui") or player:WaitForChild("PlayerGui", 5)
 if playerGui then
     screenGui.Parent = playerGui
 else
     -- Fallback: gắn vào CoreGui nếu không có PlayerGui
-    local coreGui = game:GetService("CoreGui")
+    local coreGui = safeGetService("CoreGui")
     if coreGui then
         screenGui.Parent = coreGui
     else
-        screenGui.Parent = game:GetService("StarterGui")
+        screenGui.Parent = safeGetService("StarterGui")
     end
 end
 
@@ -166,11 +211,10 @@ local function doFling()
             if otherChar then
                 local otherRoot = otherChar:FindFirstChild("HumanoidRootPart")
                 if otherRoot then
-                    -- Dùng pcall để tránh lỗi crash executor
-                    pcall(function()
-                        otherRoot.Velocity = direction
-                    end)
-                    count = count + 1
+                    -- Dùng helper an toàn để tránh lỗi crash executor
+                    if setPartVelocity(otherRoot, direction) then
+                        count = count + 1
+                    end
                 end
             end
         end
@@ -184,7 +228,7 @@ end
 -- ================================================================
 
 -- Bật/tắt chế độ fling (khi bật, nhấn F để fling)
-flingBtn.MouseButton1Click:Connect(function()
+trackConnection(flingBtn.MouseButton1Click:Connect(function()
     flingEnabled = not flingEnabled
     if flingEnabled then
         flingBtn.BackgroundColor3 = Color3.fromRGB(0, 200, 0)
@@ -193,15 +237,15 @@ flingBtn.MouseButton1Click:Connect(function()
         flingBtn.BackgroundColor3 = Color3.fromRGB(255, 70, 70)
         flingBtn.Text = "🔴 FLING: OFF"
     end
-end)
+end))
 
 -- Nút Fling ngay (không cần bật chế độ)
-flingNowBtn.MouseButton1Click:Connect(function()
+trackConnection(flingNowBtn.MouseButton1Click:Connect(function()
     doFling()
-end)
+end))
 
 -- Bật/tắt Anti-Fling
-antiBtn.MouseButton1Click:Connect(function()
+trackConnection(antiBtn.MouseButton1Click:Connect(function()
     antiFlingEnabled = not antiFlingEnabled
     if antiFlingEnabled then
         antiBtn.BackgroundColor3 = Color3.fromRGB(0, 200, 0)
@@ -210,21 +254,22 @@ antiBtn.MouseButton1Click:Connect(function()
         antiBtn.BackgroundColor3 = Color3.fromRGB(70, 70, 255)
         antiBtn.Text = "🔵 ANTI-FLING: OFF"
     end
-end)
+end))
 
 -- ================================================================
 --               PHÍM TẮT F (chỉ khi bật chế độ Fling)
 -- ================================================================
-UserInputService.InputBegan:Connect(function(input)
+trackConnection(UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
     if input.KeyCode == Enum.KeyCode.F and flingEnabled then
         doFling()
     end
-end)
+end))
 
 -- ================================================================
 --               ANTI-FLING - CHỐNG BỊ FLING
 -- ================================================================
-RunService.Heartbeat:Connect(function()
+trackConnection(RunService.Heartbeat:Connect(function()
     if not antiFlingEnabled then return end
     if not character or not rootPart or not humanoid then
         updateCharacter()
@@ -232,25 +277,42 @@ RunService.Heartbeat:Connect(function()
     end
     if humanoid.Health <= 0 then return end
 
-    local vel = rootPart.Velocity
+    local vel = rootPart.AssemblyLinearVelocity or rootPart.Velocity
     -- Ngưỡng 80: cho phép di chuyển bình thường
     if vel.Magnitude > 80 then
+        setPartVelocity(rootPart, Vector3.new(0, 0, 0))
         pcall(function()
-            rootPart.Velocity = Vector3.new(0, 0, 0)
+            rootPart.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
         end)
     end
-end)
+end))
 
 -- ================================================================
 --          XỬ LÝ KHI EXECUTOR BỊ NGẮT KẾT NỐI
 -- ================================================================
 -- Một số executor có sự kiện ngắt, một số không
-pcall(function()
-    game:GetService("RunService").Stepped:Connect(function()
-        if not isRunning then
-            -- Dọn dẹp nếu cần
-        end
-    end)
+local cleanedUp = false
+local function cleanup(destroyGui)
+    if cleanedUp then return end
+    cleanedUp = true
+
+    for _, connection in ipairs(connections) do
+        pcall(function()
+            connection:Disconnect()
+        end)
+    end
+
+    for index in ipairs(connections) do
+        connections[index] = nil
+    end
+
+    if destroyGui and screenGui then
+        screenGui:Destroy()
+    end
+end
+
+screenGui.Destroying:Connect(function()
+    cleanup(false)
 end)
 
 -- ================================================================
